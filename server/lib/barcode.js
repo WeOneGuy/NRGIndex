@@ -131,6 +131,10 @@ async function lookupChestnyZnak(rawCode, { fetchImpl = fetch } = {}) {
   }
 }
 
+// Атрибут «Вкус» иногда содержит тип товара («Энергетический напиток Берн»),
+// а не вкус: такой мусор в flavor не пускаем.
+const CATEGORY_FLAVOR_RE = /^\s*(?:энергетическ(?:ий|ого)\s+)?напиток(?![\p{L}\p{N}_])/iu;
+
 function parseTrueMarkResponse(data) {
   const m = data?.m;
   if (data?.ok === false || data?.codeFounded === false || m?.codeFounded === false) return null;
@@ -141,7 +145,8 @@ function parseTrueMarkResponse(data) {
   const brand = text(good.brand_name);
   if (!name && !brand) return null;
   const attrs = Array.isArray(good.good_attrs) ? good.good_attrs : [];
-  const flavor = text(attrs.find((attr) => attr?.attr_name === "Вкус")?.attr_value);
+  const rawFlavor = text(attrs.find((attr) => attr?.attr_name === "Вкус")?.attr_value);
+  const flavor = CATEGORY_FLAVOR_RE.test(rawFlavor) ? "" : rawFlavor;
   let image = "";
   try {
     const rawImage = text(good.good_img);

@@ -37,6 +37,9 @@ const SYSTEM_PROMPT = [
   "   Несколько вкусов перечисли через запятую.",
   "6. edition — серия/оформление банки, только если упомянуто в тексте или однозначно следует из названия (Zero, Ultra, лимитка). Иначе \"\".",
   "7. Пустая строка лучше выдуманного значения.",
+  "8. Если приложено фото банки — рассмотри его и прочитай бренд, название, вкус и издание с этикетки. Фото важнее черновика и текста.",
+  "9. Черновик — уже известные данные о банке (например, из QR-кода). Сохраняй поля черновика, если фото и текст их не уточняют.",
+  "   Если поле черновика — явный мусор (например, вкус «энергетический напиток Берн»), исправь его по фото или тексту; если данных нет — верни пустую строку, не копируй мусор.",
 ].join("\n");
 
 // Разбор отметки для банки, которая уже есть в индексе: название известно заранее,
@@ -70,6 +73,41 @@ function normalizeParsed(raw) {
   if (!clean.name && clean.brand) clean.name = clean.brand;
   if (!clean.brand && clean.name) clean.brand = clean.name.split(/\s+/)[0];
   return clean;
+}
+
+// Поля, которые могли прийти из QR/штрих-кода: ИИ их уточняет, но не теряет.
+const DRAFT_FIELDS = ["brand", "name", "flavor", "edition"];
+
+function draftBlock(draft) {
+  const source = draft && typeof draft === "object" ? draft : {};
+  const labels = { brand: "бренд", name: "название", flavor: "вкус", edition: "издание" };
+  const bits = [];
+  for (const field of DRAFT_FIELDS) {
+    const value = String(source[field] ?? "").trim().slice(0, 160);
+    if (value) bits.push(`${labels[field]}: «${value}»`);
+  }
+  return bits.length ? `Черновик: ${bits.join(", ")}.` : "";
+}
+
+// Дополняем ответ модели черновиком: пустое поле не должно стирать данные из QR.
+function mergeDraft(parsed, draft) {
+  const merged = { ...(parsed && typeof parsed === "object" ? parsed : {}) };
+  const source = draft && typeof draft === "object" ? draft : {};
+  for (const field of DRAFT_FIELDS) {
+    if (String(merged[field] ?? "").trim()) continue;
+    const value = String(source[field] ?? "").trim();
+    if (value) merged[field] = value;
+  }
+  return merged;
+}
+
+// Фото уходит тем же OpenAI-совместимым сообщением: content-части text + image_url.
+function userContent(text, imageDataUrl) {
+  if (!imageDataUrl) return text;
+  return [
+    { type: "text", text },
+    { type: "image_url", image_url: { url: imageDataUrl } },
+  ];
 }
 
 function normalizeBaseUrl(value) {
@@ -183,7 +221,9 @@ async function providerFailureDetail(res, maxLength = 200) {
 
 async function providerError(res, what) {
   const detail = await providerFailureDetail(res);
-  return new ApiError(502, `${what}: HTTP ${res.status} — ${providerHint(res.status)}${detail ? ` (${detail})` : ""}`, "ai_failed");
+  const error = new ApiError(502, `${what}: HTTP ${res.status} — ${providerHint(res.status)}${detail ? ` (${detail})` : ""}`, "ai_failed");
+  error.providerStatus = res.status;
+  return error;
 }
 
 // Поясняем код провайдера человеческим языком, чтобы в UI было не просто «HTTP 401».
@@ -259,24 +299,37 @@ async function requestParsedJson(messages, { key, model, baseUrl = DEFAULT_BASE_
   }
 }
 
-async function parseDrinkText(text, { key, parseKey, model, baseUrl, parseBaseUrl, fetchImpl = fetch, onUsage } = {}) {
+// Модели без поддержки картинок отвечают 4xx — тогда повторяем разбор без фото.
+const VISION_UNSUPPORTED_STATUSES = new Set([400, 404, 415, 422]);
+
+async function parseDrinkText(text, { key, parseKey, model, baseUrl, parseBaseUrl, draft, imageDataUrl, fetchImpl = fetch, onUsage } = {}) {
   const requestKey = parseKey || key;
   const requestBaseUrl = parseBaseUrl || baseUrl || DEFAULT_BASE_URL;
   requireKey(requestKey);
   const userText = String(text || "").slice(0, 4000);
-  const { parsed, usage } = await requestParsedJson(
-    [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userText },
-    ],
-    { key: requestKey, model, baseUrl: requestBaseUrl, fetchImpl },
-  );
-  const clean = normalizeParsed(parsed);
+  const context = draftBlock(draft);
+  const prompt = context ? `${context}\nТекст: ${userText}` : userText;
+  const request = (content) =>
+    requestParsedJson(
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+      { key: requestKey, model, baseUrl: requestBaseUrl, fetchImpl },
+    );
+  let result;
+  try {
+    result = await request(userContent(prompt, imageDataUrl));
+  } catch (error) {
+    if (!imageDataUrl || !VISION_UNSUPPORTED_STATUSES.has(error.providerStatus)) throw error;
+    result = await request(prompt);
+  }
+  const clean = normalizeParsed(mergeDraft(result.parsed, draft));
   if (!clean.name) {
     throw new ApiError(502, "Не понял, что за напиток — назови хотя бы бренд", "ai_bad_response");
   }
   const modelUsed = model || DEFAULT_MODEL;
-  onUsage?.({ ...usage, costUsd: estimateCostUsd(modelUsed, usage) }, modelUsed, "parse");
+  onUsage?.({ ...result.usage, costUsd: estimateCostUsd(modelUsed, result.usage) }, modelUsed, "parse");
   return clean;
 }
 

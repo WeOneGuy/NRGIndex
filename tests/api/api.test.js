@@ -785,6 +785,52 @@ test("разбор отметки существующей банки: имя о
   }
 });
 
+test("разбор с фото и черновиком из QR: модель видит картинку, поля не теряются", async () => {
+  const http = require("node:http");
+  let providerBody = "";
+  const provider = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      providerBody = body;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ brand: "", name: "", flavor: "манго", edition: "", review: "огонь", tier: "A" }) } }],
+        }),
+      );
+    });
+  });
+  await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  const putSetting = (key, value) =>
+    ctx.db
+      .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(key, value);
+  putSetting("parse_api_key", "test-key");
+  putSetting("parse_base_url", `http://127.0.0.1:${provider.address().port}/v1`);
+  putSetting("ai_proxy_url", "");
+
+  try {
+    const res = await request(ctx.base, "POST", "/api/cabinet/ai/parse", {
+      cookie: userCookie,
+      body: {
+        text: "вкус огонь, тир А",
+        draft: { brand: "Burn", name: "Burn Original", flavor: "энергетический напиток Берн", edition: "" },
+        imageDataUrl: testImageDataUrl,
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.parsed.brand, "Burn");
+    assert.equal(res.json.parsed.name, "Burn Original");
+    assert.equal(res.json.parsed.flavor, "манго");
+    assert.equal(res.json.parsed.tier, "A");
+    assert.match(providerBody, /image_url/);
+    assert.match(providerBody, /Burn Original/);
+  } finally {
+    await new Promise((resolve) => provider.close(resolve));
+  }
+});
+
 test("логи: запросы к ИИ и серверные ошибки видны в админке, но не засоряют журнал действий", async () => {
   const http = require("node:http");
   let fail = false;

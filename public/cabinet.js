@@ -2639,12 +2639,27 @@
     updateSmartButton();
     $("smart-status").textContent = "✦ Обрабатываю текст…";
     try {
-      const { parsed, similar } = await api("POST", "api/cabinet/ai/parse", { text });
+      // Черновик из QR/штрих-кода и уже прикреплённое фото уходят вместе с текстом:
+      // ИИ видит банку и уточняет поля, не стирая то, что уже известно.
+      const draft = pending.parsed
+        ? {
+            brand: pending.parsed.brand || "",
+            name: pending.parsed.name || "",
+            flavor: pending.parsed.flavor || "",
+            edition: pending.parsed.edition || "",
+          }
+        : null;
+      const body = { text };
+      if (draft && (draft.brand || draft.name || draft.flavor || draft.edition)) body.draft = draft;
+      const photo = pending.original || (pending.image?.startsWith("data:") ? pending.image : "");
+      if (photo) body.imageDataUrl = photo;
+      const { parsed, similar } = await api("POST", "api/cabinet/ai/parse", body);
       pending.parsed = parsed;
       renderSimilar(similar || []);
       // Разбор не нашёл похожих — показываем подтверждение «такого нет в списке».
       if (!(similar || []).length) showDupAck();
-      if (!pending.userPhoto) {
+      // Фото из QR/камеры/ленты остаётся выбранным; автоподбор ленты — только когда фото нет.
+      if (!pending.userPhoto && pending.photoSource === "auto") {
         pending.image = null;
         pending.original = null;
         pending.photoSource = "auto";
@@ -2654,7 +2669,10 @@
       $("smart-status").textContent = "";
       refreshPhotos();
     } catch (error) {
-      pending.parsed = { brand: "", name: "", flavor: "", edition: "", tier: "B", tierGuessed: true, review: "" };
+      // Разбор упал — уже полученные из QR данные не стираем.
+      if (!pending.parsed) {
+        pending.parsed = { brand: "", name: "", flavor: "", edition: "", tier: "B", tierGuessed: true, review: "" };
+      }
       renderSimilar([]);
       // Разбор не удался — это тоже неудачная попытка, просим подтвердить отсутствие.
       showDupAck();

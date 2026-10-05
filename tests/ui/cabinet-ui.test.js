@@ -340,3 +340,14 @@ test("в камере есть фонарик, а блок «Фото по сс�
   assert.match(cabinetSource, /torch/);
   assert.match(stylesSource, /#cab-view \.cabinet-ai \{ margin: 1\.2rem 0;/);
 });
+
+test("разбор ИИ видит фото и не стирает данные из QR", () => {
+  const start = cabinetSource.indexOf("const submitSmart");
+  assert.notEqual(start, -1);
+  const handler = cabinetSource.slice(start, cabinetSource.indexOf('$("smart-input").addEventListener("keydown"', start));
+  assert.match(handler, /body\.draft = draft/);
+  assert.match(handler, /body\.imageDataUrl = photo/);
+  assert.match(handler, /pending\.original \|\| \(pending\.image\?\.startsWith\("data:"\)/);
+  assert.match(handler, /pending\.photoSource === "auto"/, "фото из QR не сбрасывается автоподбором");
+  assert.match(handler, /if \(!pending\.parsed\) \{/, "поля из QR переживают ошибку разбора");
+});

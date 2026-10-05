@@ -398,7 +398,18 @@ module.exports = (db, auth, config) => {
       );
       return res.json({ parsed, similar: [] });
     }
-    const parsed = await parseDrinkText(text, { ...aiSettings(db), onUsage: trackAi });
+    // Черновик из QR/штрих-кода: ИИ уточняет его и не теряет при разборе.
+    const rawDraft = req.body?.draft && typeof req.body.draft === "object" ? req.body.draft : {};
+    const draft = {
+      brand: str(rawDraft.brand ?? "", "Бренд", { required: false, max: 80 }),
+      name: str(rawDraft.name ?? "", "Название", { required: false, max: 120 }),
+      flavor: str(rawDraft.flavor ?? "", "Вкус", { required: false, max: 160 }),
+      edition: str(rawDraft.edition ?? "", "Издание", { required: false, max: 160 }),
+    };
+    // Фото — то же, что видит пользователь в превью; проверяем, что это настоящая картинка.
+    const imageDataUrl = str(req.body?.imageDataUrl ?? "", "Фото", { required: false, max: 12 * 1024 * 1024 });
+    if (imageDataUrl) imageFromDataUrl(imageDataUrl, { maxBytes: config.maxUploadBytes });
+    const parsed = await parseDrinkText(text, { ...aiSettings(db), onUsage: trackAi, draft, imageDataUrl });
     const similar = findSimilarDrinks(db, parsed).map((drink) => ({
       ...drink,
       myTier: db

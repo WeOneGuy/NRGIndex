@@ -75,6 +75,17 @@ test("TrueMark: полный GS1, GS в query и безопасные фикси
   }
 });
 
+test("parseTrueMarkResponse: тип товара в атрибуте «Вкус» не становится вкусом", () => {
+  const junk = parseTrueMarkResponse({
+    m: { catalogData: [{ good_name: "Burn", brand_name: "Берн", good_attrs: [{ attr_name: "Вкус", attr_value: "Энергетический напиток Берн" }] }] },
+  });
+  assert.equal(junk.flavor, "");
+  const real = parseTrueMarkResponse({
+    m: { catalogData: [{ good_name: "Burn", brand_name: "Берн", good_attrs: [{ attr_name: "Вкус", attr_value: "манго" }] }] },
+  });
+  assert.equal(real.flavor, "манго");
+});
+
 test("TrueMark: HTTP, JSON и сетевая ошибка возвращают null", async () => {
   for (const fetchImpl of [
     async () => new Response("error", { status: 503 }),

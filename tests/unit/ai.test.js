@@ -96,6 +96,54 @@ test("parseDrinkText достаёт JSON даже с мусором вокруг
   assert.equal(result.review, "Вкусный");
 });
 
+test("parseDrinkText: черновик из QR не теряется, модель уточняет поля", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push(JSON.parse(options.body));
+    return chatReply({ brand: "", name: "", flavor: "манго", edition: "", review: "огонь", tier: "A" });
+  };
+  const result = await parseDrinkText("вкус огонь, тир А", {
+    key: "k",
+    fetchImpl,
+    draft: { brand: "Burn", name: "Burn Original", flavor: "энергетический напиток Берн", edition: "" },
+  });
+  assert.equal(result.brand, "Burn");
+  assert.equal(result.name, "Burn Original");
+  assert.equal(result.flavor, "манго");
+  assert.equal(result.tier, "A");
+  assert.match(calls[0].messages[1].content, /Черновик/);
+  assert.match(calls[0].messages[1].content, /Burn Original/);
+});
+
+test("parseDrinkText: с фото сообщение уходит частями text + image_url", async () => {
+  let body;
+  const fetchImpl = async (url, options) => {
+    body = JSON.parse(options.body);
+    return chatReply({ brand: "Burn", name: "Burn", review: "", tier: null });
+  };
+  const photo = "data:image/png;base64,iVBORw0KGgo=";
+  await parseDrinkText("что за банка", { key: "k", fetchImpl, imageDataUrl: photo });
+  assert.equal(body.messages[1].content[0].type, "text");
+  assert.equal(body.messages[1].content[1].type, "image_url");
+  assert.equal(body.messages[1].content[1].image_url.url, photo);
+});
+
+test("parseDrinkText: провайдер без vision — повтор без картинки", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push(body);
+    if (Array.isArray(body.messages[1].content)) {
+      return { ok: false, status: 400, text: async () => JSON.stringify({ error: { message: "No endpoints support image input" } }) };
+    }
+    return chatReply({ brand: "Burn", name: "Burn", review: "", tier: null });
+  };
+  const result = await parseDrinkText("берн", { key: "k", fetchImpl, imageDataUrl: "data:image/png;base64,iVBORw0KGgo=" });
+  assert.equal(calls.length, 2);
+  assert.equal(typeof calls[1].messages[1].content, "string");
+  assert.equal(result.name, "Burn");
+});
+
 test("parseDrinkText без ключа сообщает об ошибке", async () => {
   await assert.rejects(() => parseDrinkText("тест", { key: "" }), /ключ/i);
 });
