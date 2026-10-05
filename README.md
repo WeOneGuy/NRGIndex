@@ -30,6 +30,13 @@ npm test
 DB_PATH=./data/nrg.db UPLOADS_DIR=./data/uploads PORT=3000 npm start
 ```
 
+Ручная браузерная проверка сканера (отдельно от `npm test`): нужен установленный
+Chrome / chrome-headless-shell. Обычные тесты и CI браузера не требуют.
+
+```bash
+CHROME_BIN=/path/to/chrome-headless-shell node scripts/check-live-scanner.mjs
+```
+
 Первый администратор:
 
 ```bash

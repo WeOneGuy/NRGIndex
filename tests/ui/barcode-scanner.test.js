@@ -58,7 +58,7 @@ test("scanner: bounded full frame/ROI variants keep edge coverage", () => {
   };
   const sandbox = { document: { createElement: () => ({ getContext: () => context }) } };
   vm.createContext(sandbox);
-  vm.runInContext(source.slice(source.indexOf("  const scanVariant ="), source.indexOf("  // Живой скан:")) + "\nthis.variant = scanVariant;", sandbox);
+  vm.runInContext(source.slice(source.indexOf("  const scanVariant ="), source.indexOf("  const startAutoScan =")) + "\nthis.variant = scanVariant;", sandbox);
   for (let index = 0; index < 6; index++) {
     const canvas = sandbox.variant({ videoWidth: 3840, videoHeight: 2160 }, index);
     assert.ok(canvas.width <= 1280 && canvas.height <= 1280);
@@ -159,7 +159,7 @@ test("live fallback: один серверный кадр за раз и тол�
     },
   };
   vm.createContext(sandbox);
-  const block = source.slice(source.indexOf("  let serverScanBusy"), source.indexOf("  // Живой скан:"));
+  const block = source.slice(source.indexOf("  let serverScanBusy"), source.indexOf("  const startAutoScan ="));
   vm.runInContext(block + "\nthis.serverScanFrame = serverScanFrame;", sandbox);
   const [first, second] = await Promise.all([sandbox.serverScanFrame(), sandbox.serverScanFrame()]);
   assert.equal(first, "0104680036912629215JuVJmTnOR:3H\x1D93kjJw");
@@ -183,6 +183,8 @@ test("live fallback: после локальной осечки код с сер
     $: (id) => elements[id] ||= { open: true },
     barcodeFormats: async () => [],
     ensureZXingReader: async () => { sandbox.zxingReader = {}; },
+    loadZXingWasm: async () => ({}),
+    wasmDecoding: false, serverScanBusy: false,
     setCameraStatus: (text) => statuses.push(text),
     scanVariant: () => ({ toDataURL: () => "jpeg" }),
     wasmDecode: async () => "",
@@ -204,6 +206,7 @@ test("live fallback: после локальной осечки код с сер
   assert.equal(timers.length, 1);
   now = 3000;
   await timers[0].fn();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(serverCalls, 1);
   assert.deepEqual(lookups, ["0104680036912629215JuVJmTnOR:3H\x1D93kjJw"]);
   assert.ok(statuses.includes("🔎 Смотрю кадр внимательнее…"));
@@ -219,6 +222,8 @@ test("live fallback: не больше 24 серверных кадров за �
     $: (id) => elements[id] ||= { open: true },
     barcodeFormats: async () => [],
     ensureZXingReader: async () => { sandbox.zxingReader = {}; },
+    loadZXingWasm: async () => ({}),
+    wasmDecoding: false, serverScanBusy: false,
     setCameraStatus: () => {},
     scanVariant: () => ({ toDataURL: () => "jpeg" }),
     wasmDecode: async () => "",
@@ -239,8 +244,79 @@ test("live fallback: не больше 24 серверных кадров за �
   for (let i = 0; i < 26; i++) {
     now += 3000;
     await timers.shift().fn();
+    await new Promise((resolve) => setImmediate(resolve));
   }
   assert.equal(serverCalls, 24);
+});
+
+test("live: pending wasm/server never stop native frames; first valid result wins", async () => {
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  for (const winner of ["native", "server", "stop", "mode", "native-pending"]) {
+    const timers = [];
+    const lookups = [];
+    let nativeCalls = 0;
+    let wasmCalls = 0;
+    let serverCalls = 0;
+    let resolveWasm;
+    let resolveServer;
+    let now = 5000;
+    const expected = "0104680036912629215JuVJmTnOR:3H\x1D93kjJw";
+    const dialog = { open: true };
+    const sandbox = {
+      camera: { mode: "code", busy: false }, barcodeBusy: false,
+      autoScanGen: 0, zxingReader: {}, wasmDecoding: false, serverScanBusy: false,
+      $: (id) => id === "camera-dialog" ? dialog : {},
+      barcodeFormats: async () => ["ean_13", "data_matrix"],
+      window: { BarcodeDetector: class {
+        async detect() {
+          nativeCalls++;
+          if (winner === "native-pending") return new Promise(() => {});
+          return winner === "native" && nativeCalls === 2 ? [{ rawValue: "4680036912629" }] : [];
+        }
+      } },
+      scanVariant: () => ({}),
+      wasmDecode: () => { wasmCalls++; return new Promise((resolve) => { resolveWasm = resolve; }); },
+      serverScanFrame: () => { serverCalls++; return new Promise((resolve) => { resolveServer = resolve; }); },
+      zxingDecode: () => "",
+      setCameraStatus() {},
+      lookupBarcode: async (code) => { lookups.push(code); return true; },
+      closeCamera: () => { dialog.open = false; },
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      Date: { now: () => now },
+      NATIVE_GRACE_MS: 2500, SCAN_INTERVAL_MS: 150, SERVER_SCAN_MS: 4000, SERVER_SCAN_MAX: 24,
+    };
+    sandbox.stopAutoScan = () => { sandbox.autoScanGen++; timers.length = 0; };
+    vm.createContext(sandbox);
+    vm.runInContext(source.slice(source.indexOf("  const startAutoScan ="), source.indexOf("  const stopCamera =")) + "\nthis.start = startAutoScan;", sandbox);
+    await sandbox.start();
+    now += 3999;
+    timers.shift().fn();
+    await flush();
+    assert.equal(serverCalls, 0, "server waits four seconds after start");
+    nativeCalls = winner === "native-pending" ? nativeCalls : 0;
+    now += 1;
+    timers.shift().fn();
+    await flush();
+    assert.equal(nativeCalls, 1);
+    assert.equal(wasmCalls, 1);
+    assert.equal(serverCalls, 1);
+    assert.equal(timers[0].ms, 150, "fresh tick scheduled while both promises pending");
+    now += 5000;
+    timers.shift().fn();
+    await flush();
+    assert.equal(nativeCalls, winner === "native-pending" ? 1 : 2);
+    assert.equal(wasmCalls, 1, "no stacked wasm jobs");
+    assert.equal(serverCalls, 1, "pending server job consumes no extra attempts");
+    if (winner === "native") assert.deepEqual(lookups, ["4680036912629"], "EAN wins before either background promise resolves");
+    if (winner === "stop") sandbox.stopAutoScan();
+    if (winner === "mode") sandbox.camera.mode = "can";
+    resolveServer(expected);
+    await flush();
+    resolveWasm(expected);
+    await flush();
+    assert.deepEqual(lookups, winner === "native" ? ["4680036912629"] : ["server", "native-pending"].includes(winner) ? [expected] : []);
+    assert.ok(lookups.length <= 1);
+  }
 });
 
 test("scanner: empty manual input keeps scanning; gallery failure offers retry, stale completion does not", async () => {

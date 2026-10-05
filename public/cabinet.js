@@ -2166,94 +2166,130 @@
     }
   };
 
-  // Живой скан: пока открыт режим «Код», крутим кадры через нативный детектор,
-  // а если он молчит пару секунд (Android без сервисов Google) — подключаем ZXing.
+  // Живой скан не ждёт загрузки декодера и сети. Синхронная работа WASM/ZXing
+  // всё ещё занимает главный поток; promise-цепочки не заменяют Web Worker.
   const startAutoScan = async () => {
     stopAutoScan();
     const gen = autoScanGen;
     if (camera.mode !== "code") return;
     const formats = await barcodeFormats();
     if (gen !== autoScanGen || camera.mode !== "code" || !$("camera-dialog").open) return;
-    if (!formats.length) {
-      // Нативного детектора нет — готовим локальные читалки: wasm и legacy ZXing.
-      // Совсем без вариантов только тогда сообщим.
-      setCameraStatus("🔎 Ищу код — просто наведи камеру");
-      try {
-        await Promise.allSettled([ensureZXingReader(), loadZXingWasm()]);
-      } catch {
-        /* читалки проверяем ниже */
-      }
-      if (gen !== autoScanGen || camera.mode !== "code" || !$("camera-dialog").open) return;
-      if (!zxingReader && !window.ZXingWASM) {
-        setCameraStatus("Этот браузер не умеет читать коды — введи цифры вручную.", true);
-        $("camera-code").focus();
-        return;
-      }
-    } else {
-      setCameraStatus("🔎 Ищу код — просто наведи камеру");
-    }
+
     const startedAt = Date.now();
     const detector = formats.length ? new window.BarcodeDetector({ formats }) : null;
     let variant = 0;
     let serverAttempts = 0;
-    let serverAt = 0;
-    const tick = async () => {
+    let serverAt = startedAt;
+    let liveNativeJob = null;
+    let liveWasmJob = null;
+    let liveServerJob = null;
+    let scanResultBusy = false;
+
+    const acceptScannedCode = (code, resultGen = gen) => {
+      if (
+        !code ||
+        resultGen !== autoScanGen ||
+        camera.mode !== "code" ||
+        !$("camera-dialog").open ||
+        scanResultBusy || camera.busy || barcodeBusy
+      ) return false;
+      scanResultBusy = true;
+      stopAutoScan();
+      const lookupGen = autoScanGen;
+      camera.busy = true;
+      Promise.resolve().then(() => lookupBarcode(code))
+        .then((found) => {
+          if (found && lookupGen === autoScanGen && camera.mode === "code" && $("camera-dialog").open) closeCamera();
+          if (!found && lookupGen === autoScanGen && camera.mode === "code" && $("camera-dialog").open) {
+            // Код прочитан, но товара нет — даём шанс переснять.
+            $("btn-camera-shoot").hidden = false;
+            $("btn-camera-shoot").textContent = "↻ Сканировать снова";
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          camera.busy = false;
+          scanResultBusy = false;
+        });
+      return true;
+    };
+
+    const startWasmJob = (canvas) => {
+      if (liveWasmJob || wasmDecoding || scanResultBusy || gen !== autoScanGen) return;
+      liveWasmJob = Promise.resolve()
+        .then(() => gen === autoScanGen ? wasmDecode(canvas) : "")
+        .then((code) => {
+          if (gen !== autoScanGen) return "";
+          return code || zxingDecode(canvas);
+        })
+        .then((code) => acceptScannedCode(code, gen))
+        .catch(() => {})
+        .finally(() => { liveWasmJob = null; });
+    };
+
+    const startServerJob = () => {
+      if (liveServerJob || serverScanBusy || scanResultBusy || gen !== autoScanGen) return;
+      serverAt = Date.now();
+      serverAttempts++;
+      setCameraStatus("🔎 Смотрю кадр внимательнее…");
+      liveServerJob = Promise.resolve().then(() => gen === autoScanGen ? serverScanFrame() : "")
+        .then((code) => acceptScannedCode(code, gen))
+        .then((accepted) => {
+          if (!accepted && gen === autoScanGen && camera.mode === "code" && $("camera-dialog").open) {
+            setCameraStatus("🔎 Ищу код — просто наведи камеру");
+          }
+        })
+        .catch(() => {})
+        .finally(() => { liveServerJob = null; });
+    };
+
+    if (!formats.length) {
+      // Нативного детектора нет: загрузку локальных читалок не ждём, чтобы
+      // первый кадр не стоял на месте; tick продолжает работать немедленно.
+      setCameraStatus("🔎 Ищу код — просто наведи камеру");
+      Promise.allSettled([ensureZXingReader(), loadZXingWasm()]).then(() => {
+        if (gen === autoScanGen && camera.mode === "code" && $("camera-dialog").open && !zxingReader && !window.ZXingWASM) {
+          setCameraStatus("Этот браузер не умеет читать коды — введи код вручную.", true);
+          $("camera-code").focus();
+        }
+      }).catch(() => {});
+    } else {
+      setCameraStatus("🔎 Ищу код — просто наведи камеру");
+    }
+
+    const tick = () => {
       if (gen !== autoScanGen || camera.mode !== "code" || !$("camera-dialog").open || camera.busy || barcodeBusy) return;
       const canvas = scanVariant($("camera-video"), variant++ % 6);
       if (!canvas) {
         autoScanTimer = setTimeout(tick, 300);
         return;
       }
-      let code = "";
-      if (detector) {
-        try {
-          code = (await detector.detect(canvas))?.[0]?.rawValue || "";
-        } catch {
-          /* кадр не готов — просто пробуем снова */
-        }
-        // Нативный детектор молчит дольше грейс-периода — подключаем ZXing.
-        if (!code && !zxingReader && Date.now() - startedAt > NATIVE_GRACE_MS) {
-          await ensureZXingReader().catch(() => {});
-        }
+
+      // Один native-запрос за раз: зависший детектор не копит очередь кадров
+      // и не мешает независимым wasm/server попыткам.
+      if (detector && !liveNativeJob) {
+        liveNativeJob = Promise.resolve().then(() => gen === autoScanGen ? detector.detect(canvas) : [])
+          .then((found) => acceptScannedCode(found?.[0]?.rawValue || "", gen))
+          .catch(() => {})
+          .finally(() => { liveNativeJob = null; });
+        if (!zxingReader && Date.now() - startedAt > NATIVE_GRACE_MS) void ensureZXingReader().catch(() => {});
       }
-      if (!code) code = await wasmDecode(canvas);
-      if (gen !== autoScanGen || camera.mode !== "code" || !$("camera-dialog").open) return;
-      if (!code) code = zxingDecode(canvas);
+
+      startWasmJob(canvas);
+
       if (
-        !code &&
+        !scanResultBusy &&
+        !liveServerJob &&
         serverAttempts < SERVER_SCAN_MAX &&
         Date.now() - serverAt >= SERVER_SCAN_MS
-      ) {
-        serverAt = Date.now();
-        serverAttempts++;
-        setCameraStatus("🔎 Смотрю кадр внимательнее…");
-        code = await serverScanFrame();
-        if (gen !== autoScanGen || camera.mode !== "code" || !$("camera-dialog").open) return;
-        if (!code) setCameraStatus("🔎 Ищу код — просто наведи камеру");
-      }
-      if (gen !== autoScanGen || camera.mode !== "code" || !$("camera-dialog").open) return;
-      if (!code) {
+      ) startServerJob();
+
+      if (gen === autoScanGen && camera.mode === "code" && $("camera-dialog").open && !camera.busy) {
         autoScanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
-        return;
-      }
-      stopAutoScan();
-      const lookupGen = autoScanGen;
-      camera.busy = true;
-      try {
-        if (await lookupBarcode(code)) {
-          closeCamera();
-        } else if (lookupGen === autoScanGen) {
-          // Код прочитан, но товара нет — даём шанс переснять.
-          $("btn-camera-shoot").hidden = false;
-          $("btn-camera-shoot").textContent = "↻ Сканировать снова";
-        }
-      } finally {
-        camera.busy = false;
       }
     };
     autoScanTimer = setTimeout(tick, 300);
   };
-
   const stopCamera = () => {
     camera.stream?.getTracks().forEach((track) => track.stop());
     camera.stream = null;
