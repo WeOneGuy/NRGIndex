@@ -38,6 +38,11 @@
   };
 
   const username = new URLSearchParams(location.search).get("u") || "";
+  // Ссылки на карточки банок помечаем, чтобы главная при закрытии вернула сюда,
+  // а не выбросила пользователя на главный экран.
+  let profileUserId = username;
+  const drinkLink = (slug) =>
+    `/d/${encodeURIComponent(slug)}?from=profile&u=${encodeURIComponent(profileUserId || "")}`;
   const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
   // «сегодня / вчера / N дней назад» — мягкие подписи для активности
@@ -229,7 +234,7 @@
   };
 
   const cardTemplate = (rating, index = 0) => `
-    <a class="drink-card" href="/d/${encodeURIComponent(rating.drink)}" style="--card-accent:${safeColor(rating.accent?.[0], tierColor(rating.tier))};--i:${index}">
+    <a class="drink-card" href="${esc(drinkLink(rating.drink))}" style="--card-accent:${safeColor(rating.accent?.[0], tierColor(rating.tier))};--i:${index}">
       <span class="drink-card__visual">
         ${rating.othersAvg !== null ? `<span class="drink-card__votes">стол: ${String(rating.othersAvg).replace(".", ",")}</span>` : ""}
         <span class="drink-card__rank">${esc(rating.tier)}</span>
@@ -299,9 +304,7 @@
     $("profile-history-meta").textContent = `${history.length} ${wordForm(history.length, ["событие", "события", "событий"])}`;
     $("profile-history").innerHTML = history
       .map((item) => {
-        const link = item.slug
-          ? `<a href="/d/${encodeURIComponent(item.slug)}">карточка →</a>`
-          : "";
+        const link = item.slug ? `<a href="${esc(drinkLink(item.slug))}">карточка →</a>` : "";
         return `
         <div class="history-row">
           <time datetime="${esc(String(item.at || "").replace(" ", "T"))}Z">${esc(formatWhen(item.at))}</time>
@@ -332,6 +335,7 @@
       /* без списка участников профиль всё равно покажем */
     }
     const target = username || summary?.participants?.[0]?.id;
+    profileUserId = target || "";
     renderPeople(summary?.participants || [], target);
     if (!target) {
       $("profile-hero").innerHTML = `<p class="hint">Участников пока нет.</p>`;

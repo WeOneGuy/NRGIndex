@@ -85,6 +85,10 @@ async function runApp({ summary, pathname = "/", search = "" }) {
   };
   const board = element();
   const dialog = element();
+  const dialogHandlers = {};
+  dialog.addEventListener = (type, fn) => {
+    dialogHandlers[type] = fn;
+  };
   const dialogContent = element();
   let modalOpened = false;
   dialog.showModal = () => {
@@ -150,6 +154,8 @@ async function runApp({ summary, pathname = "/", search = "" }) {
     handlers,
     urls,
     modalOpened,
+    dialogHandlers,
+    location: sandbox.location,
     rootProps,
     rootClasses,
     searchEl: byId["board-search"],
@@ -198,6 +204,25 @@ test("диплинк /d/:slug открывает диалог", async () => {
   const { modalOpened, urls } = await runApp({ summary: makeSummary(), pathname: "/d/volt-mango" });
   assert.equal(modalOpened, true);
   assert.ok(urls[urls.length - 1].endsWith("/d/volt-mango"));
+});
+
+test("диплинк из профиля: закрытие карточки возвращает в профиль, а не на главную", async () => {
+  const { dialogHandlers, location: loc, modalOpened } = await runApp({
+    summary: makeSummary(),
+    pathname: "/d/burn-original",
+    search: "?from=profile&u=sanya",
+  });
+  assert.equal(modalOpened, true);
+  assert.equal(typeof dialogHandlers.close, "function", "закрытие диалога должно быть перехвачено");
+  dialogHandlers.close();
+  assert.equal(loc.href, "/profile.html?u=sanya", "крестик возвращает на профиль автора");
+});
+
+test("диплинк без метки профиля: закрытие чистит URL на главную", async () => {
+  const { dialogHandlers, location: loc, urls } = await runApp({ summary: makeSummary(), pathname: "/d/volt-mango" });
+  dialogHandlers.close();
+  assert.ok(urls[urls.length - 1] === "/", "обычный диплинк закрывается на /");
+  assert.equal(loc.href, undefined);
 });
 
 test("карточка: не пробовавшие — внизу, под оценившими", async () => {

@@ -39,7 +39,8 @@ test("доска: карточка не крутится за курсором �
 test("диплинк: /d/:slug открывает карточку, закрытие чистит URL", () => {
   assert.match(appSource, /location\.pathname\.match\(\/\^\\\/d\\\//);
   assert.match(appSource, /history\.replaceState\(null, "", `\/d\/\$\{encodeURIComponent\(drink\.id\)\}`\)/);
-  assert.match(appSource, /if \(location\.pathname\.startsWith\("\/d\/"\)\) history\.replaceState\(null, "", "\/"\)/);
+  assert.match(appSource, /if \(!location\.pathname\.startsWith\("\/d\/"\)\) return;/);
+  assert.match(appSource, /history\.replaceState\(null, "", "\/"\)/);
 });
 
 test("диалог: повторное открытие и закрытие с клавиатуры не ломают карточку", () => {
@@ -75,7 +76,8 @@ test("диалог: кнопка копирования ссылки на бан
 });
 
 test("профиль: карточки ведут на /d/:slug", () => {
-  assert.match(profileSource, /href="\/d\/\$\{encodeURIComponent\(rating\.drink\)\}"/);
+  assert.match(profileSource, /const drinkLink = \(slug\)/);
+  assert.match(profileSource, /href="\$\{esc\(drinkLink\(rating\.drink\)\)\}"/);
   assert.doesNotMatch(profileSource, /\?drink=\$/);
 });
 
@@ -124,6 +126,13 @@ test("главный экран: аура курсора и «разложенн
   assert.match(appSource, /const rootStyle = document\.documentElement\.style;/);
   assert.match(appSource, /rootStyle\.setProperty\("--can-a", accentA\)/);
   assert.match(appSource, /rootStyle\.setProperty\("--can-b", accentB\)/);
+});
+
+test("профиль: карточки банок помечаются ?from=profile, закрытие возвращает в профиль", () => {
+  assert.match(profileSource, /const drinkLink = \(slug\)/);
+  assert.match(profileSource, /from=profile&u=/);
+  assert.match(appSource, /params\.get\("from"\) === "profile"/);
+  assert.match(appSource, /location\.href = back/);
 });
 
 test("главный экран: до данных нет розовой вспышки — нейтральные цвета и скрытая аура", () => {
