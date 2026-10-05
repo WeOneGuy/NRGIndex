@@ -38,6 +38,9 @@
   const updateNode = document.querySelector("#last-update");
   const aura = document.querySelector(".cursor-aura");
   const rootStyle = document.documentElement.style;
+  // Если карточку открыли со страницы профиля, закрытие должно вернуть туда,
+  // а не выбросить пользователя на главную (диплинк /d/<slug>?from=profile).
+  let returnToProfile = "";
 
   let data = null;
   let activeView = "average";
@@ -310,9 +313,10 @@
     }
   };
 
-  const openDrink = (drinkId) => {
+  const openDrink = (drinkId, { returnTo = "" } = {}) => {
     const drink = getDrink(drinkId);
     if (!drink) return;
+    if (returnTo) returnToProfile = returnTo;
     const average = averageFor(drink);
     const votes = scoredRatings(drink).length;
     const scoreCopy = average
@@ -491,7 +495,16 @@
   });
   dialog.addEventListener("close", () => {
     document.body.classList.remove("is-dialog-open");
-    if (location.pathname.startsWith("/d/")) history.replaceState(null, "", "/");
+    if (!location.pathname.startsWith("/d/")) return;
+    if (returnToProfile) {
+      // Карточку открывали со страницы профиля — закрытие возвращает туда,
+      // а не выбрасывает на главную.
+      const back = returnToProfile;
+      returnToProfile = "";
+      location.href = back;
+      return;
+    }
+    history.replaceState(null, "", "/");
   });
 
   const observer = new IntersectionObserver(
@@ -655,7 +668,14 @@
     const drinkParam = (pathDrink ? decodeURIComponent(pathDrink) : params.get("drink")) || "";
     if (drinkParam && getDrink(drinkParam)) {
       history.replaceState(null, "", location.pathname + location.hash);
-      openDrink(drinkParam);
+      // Из профиля карточки приходят с ?from=profile&u=<ник>: запоминаем, куда вернуть.
+      const fromProfile =
+        params.get("from") === "profile"
+          ? params.get("u")
+            ? `/profile.html?u=${encodeURIComponent(params.get("u"))}`
+            : "/profile.html"
+          : "";
+      openDrink(drinkParam, { returnTo: fromProfile });
     }
   })();
 })();
