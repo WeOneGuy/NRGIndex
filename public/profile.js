@@ -38,9 +38,11 @@
   };
 
   const username = new URLSearchParams(location.search).get("u") || "";
-  // Ссылки на карточки банок помечаем, чтобы главная при закрытии вернула сюда,
-  // а не выбросила пользователя на главный экран.
+  // Ссылки на карточки банок остаются фолбэком без JS (ведут на главную и
+  // возвращают сюда). С включённым JS диалог открывается прямо в профиле.
   let profileUserId = username;
+  let summaryData = null;
+  let currentUser = null;
   const drinkLink = (slug) =>
     `/d/${encodeURIComponent(slug)}?from=profile&u=${encodeURIComponent(profileUserId || "")}`;
   const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
@@ -233,8 +235,62 @@
     window.nrgCountUp?.($("profile-hero"));
   };
 
+  /* ---------- карточка банки: открываем диалог прямо в профиле ---------- */
+  // Никаких переходов на главную: тот же диалог, что и там (public/drink-dialog.js),
+  // поэтому ничего не мелькает и открывается мгновенно.
+  const closeDrinkDialog = () => {
+    const dialog = $("drink-dialog");
+    if (dialog?.open) dialog.close();
+  };
+
+  const openDrinkDialog = (slug) => {
+    const dialog = $("drink-dialog");
+    const content = $("dialog-content");
+    const drink = summaryData?.drinks?.find((item) => item.id === slug);
+    if (!dialog || !content || !drink || !window.NrgDrinkDialog) return;
+    content.innerHTML = window.NrgDrinkDialog.html({ drink, data: summaryData, currentUser });
+    content.querySelectorAll("[data-related-drink]").forEach((button) => {
+      button.addEventListener("click", () => openDrinkDialog(button.dataset.relatedDrink));
+    });
+    content.querySelectorAll("[data-person-view]").forEach((button) => {
+      button.addEventListener("click", () => {
+        location.href = `/profile.html?u=${encodeURIComponent(button.dataset.personView)}`;
+      });
+    });
+    content.querySelector("[data-share-drink]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const url = `${location.origin}/d/${encodeURIComponent(button.dataset.shareDrink)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        const original = button.textContent;
+        button.textContent = "ссылка готова ✓";
+        window.setTimeout(() => {
+          button.textContent = original;
+        }, 1500);
+      } catch {
+        button.textContent = "не вышло — ссылка в адресной строке";
+      }
+    });
+    if (!dialog.open) dialog.showModal();
+    document.body.classList.add("is-dialog-open");
+  };
+
+  document.querySelector(".dialog-close")?.addEventListener("click", closeDrinkDialog);
+  const profileDialog = document.querySelector("#drink-dialog");
+  profileDialog?.addEventListener("click", (event) => {
+    if (event.target === profileDialog) closeDrinkDialog();
+  });
+  profileDialog?.addEventListener("close", () => document.body.classList.remove("is-dialog-open"));
+  // Ссылка остаётся фолбэком для браузеров без JS, с JS — открываем диалог здесь.
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[data-drink]");
+    if (!link) return;
+    event.preventDefault();
+    openDrinkDialog(link.dataset.drink);
+  });
+
   const cardTemplate = (rating, index = 0) => `
-    <a class="drink-card" href="${esc(drinkLink(rating.drink))}" style="--card-accent:${safeColor(rating.accent?.[0], tierColor(rating.tier))};--i:${index}">
+    <a class="drink-card" data-drink="${esc(rating.drink)}" href="${esc(drinkLink(rating.drink))}" style="--card-accent:${safeColor(rating.accent?.[0], tierColor(rating.tier))};--i:${index}">
       <span class="drink-card__visual">
         ${rating.othersAvg !== null ? `<span class="drink-card__votes">стол: ${String(rating.othersAvg).replace(".", ",")}</span>` : ""}
         <span class="drink-card__rank">${esc(rating.tier)}</span>
@@ -304,7 +360,9 @@
     $("profile-history-meta").textContent = `${history.length} ${wordForm(history.length, ["событие", "события", "событий"])}`;
     $("profile-history").innerHTML = history
       .map((item) => {
-        const link = item.slug ? `<a href="${esc(drinkLink(item.slug))}">карточка →</a>` : "";
+        const link = item.slug
+          ? `<a data-drink="${esc(item.slug)}" href="${esc(drinkLink(item.slug))}">карточка →</a>`
+          : "";
         return `
         <div class="history-row">
           <time datetime="${esc(String(item.at || "").replace(" ", "T"))}Z">${esc(formatWhen(item.at))}</time>
@@ -334,6 +392,13 @@
     } catch {
       /* без списка участников профиль всё равно покажем */
     }
+    summaryData = summary;
+    // Роль — только чтобы в карточке показать кнопку правки для сотрудников.
+    getJson("/api/auth/me")
+      .then((me) => {
+        currentUser = me?.user || null;
+      })
+      .catch(() => {});
     const target = username || summary?.participants?.[0]?.id;
     profileUserId = target || "";
     renderPeople(summary?.participants || [], target);

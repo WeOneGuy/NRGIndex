@@ -7,6 +7,7 @@ const appSource = fs.readFileSync(path.join(__dirname, "..", "..", "public", "ap
 const indexHtml = fs.readFileSync(path.join(__dirname, "..", "..", "public", "index.html"), "utf8");
 const rouletteSource = fs.readFileSync(path.join(__dirname, "..", "..", "public", "roulette.js"), "utf8");
 const stylesSource = fs.readFileSync(path.join(__dirname, "..", "..", "public", "styles.css"), "utf8");
+const dialogSource = fs.readFileSync(path.join(__dirname, "..", "..", "public", "drink-dialog.js"), "utf8");
 const profileSource = fs.readFileSync(path.join(__dirname, "..", "..", "public", "profile.js"), "utf8");
 
 test("доска: строка поиска и фильтры тиров в разметке", () => {
@@ -145,16 +146,16 @@ test("главный экран: до данных нет розовой всп�
 });
 
 test("доска: оценка уводит в кабинет на нужную банку, без инлайн-формы", () => {
-  assert.match(appSource, /cabinet\.html\?rate=\$\{encodeURIComponent\(drink\.id\)\}/);
-  assert.match(appSource, /class="dialog-rate"/);
+  assert.match(dialogSource, /cabinet\.html\?rate=\$\{encodeURIComponent\(drink\.id\)\}/);
+  assert.match(dialogSource, /class="dialog-rate"/);
   assert.doesNotMatch(appSource, /data-quick-tier/);
   assert.doesNotMatch(appSource, /quick-save/);
   assert.match(stylesSource, /\.dialog-rate/);
 });
 
 test("доска: сотрудникам рядом кнопка правки банки в админке", () => {
-  assert.match(appSource, /\["admin", "editor"\]\.includes\(currentUser\.role\)/);
-  assert.match(appSource, /admin\?drink=\$\{encodeURIComponent\(drink\.id\)\}/);
+  assert.match(dialogSource, /\["admin", "editor"\]\.includes\(currentUser\.role\)/);
+  assert.match(dialogSource, /admin\?drink=\$\{encodeURIComponent\(drink\.id\)\}/);
 });
 
 test("витрина: смена банки анимируется, а не мигает", () => {

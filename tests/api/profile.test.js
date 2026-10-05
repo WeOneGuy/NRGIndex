@@ -270,7 +270,8 @@ test("страница профиля: локальные шрифты без Go
 test("на участника можно нажать: ссылки на профиль со всех страниц", () => {
   const app = read("public/app.js");
   assert.match(app, /class="view-chip__profile" href="profile\.html\?u=/);
-  assert.match(app, /<a class="reviewer" href="profile\.html\?u=/);
+  // Карточка банки рендерится общим модулем (app.js и профиль).
+  assert.match(read("public/drink-dialog.js"), /<a class="reviewer" href="profile\.html\?u=/);
   assert.match(read("public/cabinet.html"), /id="profile-link"/);
   assert.match(
     read("public/cabinet.js"),
