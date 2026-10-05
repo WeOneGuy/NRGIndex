@@ -162,7 +162,7 @@ test("security: клиент экранирует значения атрибу�
     "item.dataUrl",
   ]);
   const problems = [];
-  for (const file of ["public/app.js", "public/cabinet.js", "public/profile.js", "admin/admin.js"]) {
+  for (const file of ["public/app.js", "public/cabinet.js", "public/profile.js", "public/drink-dialog.js", "admin/admin.js"]) {
     read(file)
       .split("\n")
       .forEach((line, lineIndex) => {

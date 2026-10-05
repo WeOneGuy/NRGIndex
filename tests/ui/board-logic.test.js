@@ -8,6 +8,7 @@ const vm = require("node:vm");
 
 const APP = fs.readFileSync(path.join(__dirname, "..", "..", "public", "app.js"), "utf8");
 const ROULETTE = fs.readFileSync(path.join(__dirname, "..", "..", "public", "roulette.js"), "utf8");
+const DRINK_DIALOG = fs.readFileSync(path.join(__dirname, "..", "..", "public", "drink-dialog.js"), "utf8");
 
 function makeSummary() {
   return {
@@ -144,8 +145,9 @@ async function runApp({ summary, pathname = "/", search = "" }) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  // как на странице: барабан рулетки подключается до app.js
+  // как на странице: рулетка и общий диалог подключаются до app.js
   vm.runInContext(ROULETTE, sandbox, { filename: "roulette.js" });
+  vm.runInContext(DRINK_DIALOG, sandbox, { filename: "drink-dialog.js" });
   vm.runInContext(APP, sandbox, { filename: "app.js" });
   // ждём fetch + debounce renderBoard (170мс)
   await new Promise((resolve) => setTimeout(resolve, 400));
