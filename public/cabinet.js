@@ -103,6 +103,7 @@
     $("profile-link").href = `profile.html?u=${encodeURIComponent(state.me.username)}`;
     $("profile-link").hidden = !state.me.isPublic;
     await refreshAll();
+    restoreDraft();
     // Диплинк с тирлиста: cabinet.html?rate=<slug> — сразу открываем редактор мнения.
     const rateSlug = new URLSearchParams(location.search).get("rate");
     if (rateSlug) {
@@ -1353,6 +1354,7 @@
     };
     switchCabTab("add");
     showPreview();
+    scheduleDraftSave();
     refreshPhotos();
     $("smart-status").textContent = "Проверь поля и жми «В индекс ✓»";
   });
@@ -1460,6 +1462,7 @@
       (item.isStock ? " · стоковое" : item.cut ? "" : " · фон не вырезан");
     markSelected();
     updatePreviewImage();
+    scheduleDraftSave();
   };
 
   const renderTile = (index) => {
@@ -1523,6 +1526,7 @@
         pending.original = null;
         pending.photoNote = "фото не нашлось — приложи своё или выбери ссылкой";
         updatePreviewImage();
+        scheduleDraftSave();
       }
       return;
     }
@@ -1703,6 +1707,128 @@
     await refreshAll();
   };
 
+  /* ---------- черновик добавления ---------- */
+  // Незаконченное добавление живёт в localStorage: случайный уход со страницы
+  // или закрытие вкладки не теряют поля, фото и штрих-код.
+  const DRAFT_STORAGE_KEY = "nrgindex.cabinet.addDraft.v1";
+  const draftStorageKey = () => `${DRAFT_STORAGE_KEY}.${state.me?.username || "anon"}`;
+
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(draftStorageKey());
+    } catch {
+      /* localStorage недоступен — черновиков нет и так */
+    }
+  };
+
+  const draftPayload = () => ({
+    version: 1,
+    text: $("smart-input").value,
+    parsed: pending.parsed,
+    image: pending.image && pending.image.startsWith("data:") ? pending.image : "",
+    original: pending.original && pending.original.startsWith("data:") ? pending.original : "",
+    imageUrl: $("m-image-url").value,
+    photoNote: pending.photoNote,
+    photoSource: pending.photoSource,
+    userPhoto: pending.userPhoto,
+    barcode: pending.barcode,
+    rawCode: pending.rawCode,
+  });
+
+  const hasDraftContent = (draft) => {
+    if (!draft) return false;
+    if (String(draft.text || "").trim()) return true;
+    if (draft.image || draft.original || draft.barcode) return true;
+    const parsed = draft.parsed || {};
+    return Boolean(parsed.brand || parsed.name || parsed.flavor || parsed.edition || parsed.review);
+  };
+
+  const saveDraft = () => {
+    if (!state.me) return;
+    const payload = draftPayload();
+    if (!hasDraftContent(payload)) {
+      clearDraft();
+      return;
+    }
+    try {
+      localStorage.setItem(draftStorageKey(), JSON.stringify(payload));
+    } catch {
+      // Место кончилось: текстовые поля важнее картинок.
+      try {
+        localStorage.setItem(draftStorageKey(), JSON.stringify({ ...payload, image: "", original: "" }));
+      } catch {
+        /* совсем нет места — черновик просто не сохранится */
+      }
+    }
+  };
+
+  let draftSaveTimer = null;
+  const scheduleDraftSave = () => {
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(saveDraft, 400);
+  };
+
+  const loadDraft = () => {
+    try {
+      const raw = localStorage.getItem(draftStorageKey());
+      if (!raw) return null;
+      const draft = JSON.parse(raw);
+      if (!draft || typeof draft !== "object" || draft.version !== 1) return null;
+      return draft;
+    } catch {
+      clearDraft();
+      return null;
+    }
+  };
+
+  const restoreDraft = () => {
+    // Поздний refreshAll не должен перетирать уже начатый ввод.
+    if ($("smart-input").value.trim() || pending.parsed || pending.image) return;
+    const draft = loadDraft();
+    if (!draft) return;
+    if (!hasDraftContent(draft)) {
+      clearDraft();
+      return;
+    }
+    $("smart-input").value = typeof draft.text === "string" ? draft.text : "";
+    autoGrow($("smart-input"));
+    $("m-image-url").value = typeof draft.imageUrl === "string" ? draft.imageUrl : "";
+    pending.parsed = draft.parsed && typeof draft.parsed === "object" ? draft.parsed : null;
+    pending.image =
+      typeof draft.image === "string" && draft.image.startsWith("data:") ? draft.image : null;
+    pending.original =
+      typeof draft.original === "string" && draft.original.startsWith("data:") ? draft.original : null;
+    pending.photoNote = typeof draft.photoNote === "string" ? draft.photoNote : "";
+    pending.photoSource = typeof draft.photoSource === "string" ? draft.photoSource : "auto";
+    pending.userPhoto = Boolean(draft.userPhoto);
+    pending.barcode = typeof draft.barcode === "string" ? draft.barcode : "";
+    pending.rawCode = typeof draft.rawCode === "string" ? draft.rawCode : "";
+    // Согласие на дубль не восстанавливаем: пусть человек заново проверит список.
+    pending.similarCount = 0;
+    pending.duplicateAck = true;
+    pending.absenceAck = false;
+    // Фото/код без разобранных полей — открываем карточку с пустыми полями, как после скана.
+    if (!pending.parsed && (pending.image || pending.barcode)) {
+      pending.parsed = { brand: "", name: "", flavor: "", edition: "", tier: "B", tierGuessed: true, review: "" };
+    }
+    switchCabTab("add");
+    updateSmartButton();
+    if (!pending.parsed) {
+      $("smart-status").textContent = "Черновик восстановлен — жми «Обработать».";
+      return;
+    }
+    showPreview();
+    showDupAck();
+    $("smart-status").textContent =
+      "Черновик восстановлен — проверь список и подтверди, что этой банки нет. Отменить можно в карточке ниже.";
+  };
+
+  window.addEventListener("beforeunload", saveDraft);
+  window.addEventListener("pagehide", saveDraft);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") saveDraft();
+  });
+
   const resetSmart = () => {
     pending.parsed = null;
     pending.image = null;
@@ -1729,6 +1855,7 @@
     $("dup-gate-results").innerHTML = "";
     hideDupAck();
     clearVoice("smart");
+    clearDraft();
   };
 
   // Подтверждение «такого нет в списке» показываем только после неудачных попыток
@@ -1829,6 +1956,8 @@
         renderSimilar([]);
         showDupAck();
         showPreview();
+        // lookupBarcode гоняют в изоляции (vm) без остального IIFE — зовём аккуратно.
+        if (typeof scheduleDraftSave === "function") scheduleDraftSave();
         $("smart-status").textContent = `штрих-код ${data.code} — товара нет в базах, заполни бренд и название вручную`;
         return true;
       }
@@ -1860,11 +1989,13 @@
             pending.image = dataUrl;
             pending.photoNote = `фото ${label} ✓`;
             updatePreviewImage();
+            if (typeof scheduleDraftSave === "function") scheduleDraftSave();
           })
           .catch(() => {
             if (!current()) return;
             pending.photoNote = `фото из ${label} не загрузилось`;
             updatePreviewImage();
+            if (typeof scheduleDraftSave === "function") scheduleDraftSave();
           });
       }
       $("smart-status").textContent = data.inIndex
@@ -1873,6 +2004,7 @@
       if (longName) $("smart-status").textContent += ` · Название источника: ${sourceName}. Введи краткое название до 120 символов — исходное не обрезано.`;
       showPreview();
       refreshPhotos();
+      if (typeof scheduleDraftSave === "function") scheduleDraftSave();
       return true;
     } catch (error) {
       if (gen !== autoScanGen) return false;
@@ -2431,6 +2563,7 @@
       strip.selected = -1;
       markSelected();
       updatePreviewImage();
+      scheduleDraftSave();
       closeCamera();
       $("smart-status").textContent = "Фото с камеры готово ✓";
     } catch (error) {
@@ -2488,6 +2621,7 @@
       strip.selected = -1;
       markSelected();
       updatePreviewImage();
+      scheduleDraftSave();
       closeCamera();
       $("smart-status").textContent = "Фото приложено ✓";
     } catch {
@@ -2625,7 +2759,11 @@
   const updateSmartButton = () => {
     $("btn-smart").disabled = smartBusy || !$("smart-input").value.trim();
   };
+  // Обработчиком ввода остаётся updateSmartButton (на него смотрит статический
+  // тест), сохранение черновика висит отдельным слушателем.
   $("smart-input").addEventListener("input", updateSmartButton);
+  $("smart-input").addEventListener("input", scheduleDraftSave);
+  $("m-image-url").addEventListener("input", scheduleDraftSave);
 
   const submitSmart = async (event) => {
     event.preventDefault();
@@ -2666,6 +2804,7 @@
         pending.photoNote = "Ищу фото…";
       }
       showPreview();
+      scheduleDraftSave();
       $("smart-status").textContent = "";
       refreshPhotos();
     } catch (error) {
@@ -2677,6 +2816,7 @@
       // Разбор не удался — это тоже неудачная попытка, просим подтвердить отсутствие.
       showDupAck();
       showPreview();
+      scheduleDraftSave();
       $("smart-status").textContent = `${error.message}. Заполни поля в карточке и жми «В индекс ✓».`;
     } finally {
       smartBusy = false;
@@ -2729,6 +2869,25 @@
       syncConfirmState();
     }
   };
+  // «Отменить» стирает весь черновик: подтверждение нужно, чтобы случайный тап
+  // не унёс поля и фото, которые человек уже собрал.
+  const cancelDraft = async () => {
+    const hasSomething = !$("smart-preview").hidden || hasDraftContent(draftPayload());
+    if (!hasSomething) {
+      $("smart-status").textContent = "Черновика нет — форма и так пуста.";
+      return;
+    }
+    const ok = await window.nrgConfirm({
+      title: "Отменить добавление?",
+      message: "Черновик, поля и фото будут удалены — вернуть их будет нельзя.",
+      confirmText: "Удалить черновик",
+      cancelText: "Оставить",
+    });
+    if (!ok) return;
+    resetSmart();
+    $("smart-status").textContent = "Черновик удалён — можно начать заново.";
+  };
+  $("btn-draft-cancel").onclick = cancelDraft;
   $("btn-retry-photo").onclick = retryPhoto;
 
   for (const [id, field] of [
@@ -2743,6 +2902,7 @@
       if (!pending.parsed) return;
       pending.parsed[field] = event.target.value;
       if (field === "tier") pending.parsed.tierGuessed = false;
+      scheduleDraftSave();
       updateTierNote();
       if (["brand", "name", "flavor"].includes(field)) schedulePhotos();
     });
@@ -2761,6 +2921,7 @@
       pending.photoNote = "не удалось загрузить фото по ссылке (сайт не отдаёт картинку)";
     }
     updatePreviewImage();
+    scheduleDraftSave();
     if (!pending.parsed) {
       $("smart-status").textContent = pending.photoSource === "url" ? "Фото взято ✓" : pending.photoNote;
     }
@@ -2786,6 +2947,7 @@
         strip.selected = -1;
         markSelected();
         updatePreviewImage();
+        scheduleDraftSave();
         $("smart-status").textContent = "Банка перерисована ✓";
       },
       button: $("btn-redraw"),
@@ -2927,6 +3089,7 @@
       status.textContent = ui.done;
       autoGrow(area);
       voiceTarget === "smart" ? updateSmartButton() : updateOpButton();
+      if (voiceTarget === "smart") scheduleDraftSave();
       area.focus();
     } catch (error) {
       console.error("[nrgindex] распознавание не удалось:", error);
