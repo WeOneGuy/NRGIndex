@@ -72,16 +72,18 @@
       .join("");
   };
 
-  const renderHero = ({ profile, stats, tiers }) => {
+  const renderHero = ({ profile, stats, tiers, titles }) => {
     const color = safeColor(profile.color, "#9fb7ff");
     const max = Math.max(1, ...Object.values(stats.distribution));
     const bars = tiers
       .map((tier, index) => {
         const n = stats.distribution[tier.id] || 0;
         return `
-        <div class="dist-bar" style="--tier-color:${tierColor(tier.id)};--i:${index}">
-          <span class="dist-bar__count">${n}</span>
-          <span class="dist-bar__fill" style="--h:${Math.round((n / max) * 100)}%"></span>
+        <div class="dist-bar" style="--tier-color:${tierColor(tier.id)};--i:${index};--h:${Math.round((n / max) * 100)}%">
+          <div class="dist-bar__plot">
+            <span class="dist-bar__count">${n}</span>
+            <span class="dist-bar__fill"></span>
+          </div>
           <b>${esc(tier.id)}</b>
         </div>`;
       })
@@ -99,6 +101,17 @@
           : stats.agreement >= 60
             ? "в целом согласен со столом"
             : "идёт против стола";
+    const titlesMarkup = titles?.items?.length
+      ? `<p class="profile-titles" aria-label="Титулы месяца">
+           <small>титулы · ${esc(titles.month?.label || "")}</small>
+           ${titles.items
+             .map(
+               (title) =>
+                 `<span class="profile-title" title="${esc(title.hint || "")}">${esc(title.label)}</span>`,
+             )
+             .join("")}
+         </p>`
+      : "";
 
     // Мягкая активность: сетка дней за 15 недель и пара живых инсайтов.
     const activity = stats.activity || {
@@ -212,6 +225,7 @@
         <div>
           <p class="eyebrow">Участник${profile.since ? ` · с ${esc(profile.since)}` : ""}</p>
           <h1>${esc(profile.name)}</h1>
+          ${titlesMarkup}
           <p class="profile-role">${esc(profile.role || "дегустатор без титула")}</p>
         </div>
       </div>
@@ -227,10 +241,12 @@
     `;
     // столбики растут из нуля: целевая высота уже в --h, ставим её после отрисовки
     $("profile-hero")
-      .querySelectorAll(".dist-bar__fill")
-      .forEach((fill) => {
+      .querySelectorAll(".dist-bar")
+      .forEach((bar) => {
+        const fill = bar.querySelector(".dist-bar__fill");
+        if (!fill) return;
         void fill.offsetHeight;
-        fill.style.height = fill.style.getPropertyValue("--h");
+        fill.style.height = bar.style.getPropertyValue("--h");
       });
     window.nrgCountUp?.($("profile-hero"));
   };

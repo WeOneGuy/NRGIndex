@@ -70,9 +70,12 @@ function element() {
 
 async function runApp({ summary, pathname = "/", search = "" }) {
   const handlers = {};
+  const brandHandlers = {};
   const byId = {
     "board-search": element(),
     "board-filters": element(),
+    "brand-list": element(),
+    brands: element(),
     "hero-specimen": element(),
     "specimen-image": element(),
     "specimen-stamp": element(),
@@ -83,6 +86,9 @@ async function runApp({ summary, pathname = "/", search = "" }) {
   };
   byId["board-filters"].addEventListener = (type, fn) => {
     handlers[`filters:${type}`] = fn;
+  };
+  byId["brand-list"].addEventListener = (type, fn) => {
+    brandHandlers[type] = fn;
   };
   const board = element();
   const dialog = element();
@@ -161,6 +167,9 @@ async function runApp({ summary, pathname = "/", search = "" }) {
     rootProps,
     rootClasses,
     searchEl: byId["board-search"],
+    brandList: byId["brand-list"],
+    brandSection: byId.brands,
+    brandHandlers,
     dialogContent,
     specimen: {
       card: byId["hero-specimen"],
@@ -299,4 +308,43 @@ test("витрина: аура курсора и «разложенная» бе
 test("витрина: после раскраски включается html.can-ready — аура появляется уже в цвете", async () => {
   const { rootClasses } = await runApp({ summary: makeSummary() });
   assert.ok(rootClasses.has("can-ready"), "после раскраски витрины ставим html.can-ready");
+});
+
+test("бренды: балл — среднее моделей, неоценённые не в счёте", async () => {
+  const summary = makeSummary();
+  summary.drinks.push(
+    {
+      id: "burn-mango", brand: "Burn", name: "Burn Mango", flavor: "манго", edition: "",
+      image: "assets/burn.png", accent: ["#ff4f79", "#ff7448"],
+      ratings: { sanya: { tier: "A", review: "" } }, related: [],
+    },
+    {
+      id: "burn-zero", brand: "Burn", name: "Burn Zero", flavor: "зеро", edition: "",
+      image: "assets/burn.png", accent: ["#ff4f79", "#ff7448"], ratings: {}, related: [],
+    },
+  );
+  const { brandList, brandSection } = await runApp({ summary });
+  assert.equal(brandSection.hidden, false);
+  // Burn: (S=5 + A=4) / 2 = 4.5; Volt: A=4 → Burn первый
+  assert.ok(brandList.innerHTML.indexOf("Burn") < brandList.innerHTML.indexOf("Volt"));
+  assert.match(brandList.innerHTML, /4\.5/);
+  assert.match(brandList.innerHTML, /2 из 3 моделей · 2 голоса/);
+  assert.match(brandList.innerHTML, /data-brand="Burn"/);
+});
+
+test("бренды: клик фильтрует общий стол по бренду", async () => {
+  const { brandHandlers, searchEl, board } = await runApp({ summary: makeSummary() });
+  brandHandlers.click({ target: { closest: () => ({ dataset: { brand: "Burn" } }) } });
+  await sleep(300);
+  assert.equal(searchEl.value, "Burn");
+  assert.match(board.innerHTML, /Burn Original/);
+  assert.doesNotMatch(board.innerHTML, /Volt Mango/);
+});
+
+test("бренды: без оценок секция скрыта", async () => {
+  const summary = makeSummary();
+  summary.drinks.forEach((drink) => (drink.ratings = {}));
+  const { brandSection, brandList } = await runApp({ summary });
+  assert.equal(brandSection.hidden, true);
+  assert.equal(brandList.innerHTML, "");
 });

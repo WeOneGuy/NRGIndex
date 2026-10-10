@@ -166,3 +166,13 @@ test("витрина: смена банки анимируется, а не ми
   assert.match(stylesSource, /\.specimen-card\.is-entering img/);
   assert.match(stylesSource, /\.specimen-card__halo::after/);
 });
+
+test("главная: секция «Бренды» между столом и рулеткой, клик фильтрует стол", () => {
+  assert.match(indexHtml, /id="brand-list"/);
+  assert.ok(indexHtml.indexOf('id="brand-list"') > indexHtml.indexOf('id="tier-board"'));
+  assert.ok(indexHtml.indexOf('id="brand-list"') < indexHtml.indexOf('id="roulette"'));
+  assert.match(appSource, /const renderBrands = \(\) =>/);
+  assert.match(appSource, /const brandRows = \(\) =>/);
+  assert.match(appSource, /renderBrands\(\);/);
+  assert.match(stylesSource, /\.brand-row \{/);
+});

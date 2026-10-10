@@ -62,6 +62,39 @@
     return { tier: closest.id, value, votes: ratings.length };
   };
 
+  // Рейтинг брендов: балл — среднее общих оценок моделей, каждая модель весит
+  // одинаково. Неоценённые модели дают бренду «из N», но балл не разбавляют.
+  const brandRows = () => {
+    const byBrand = new Map();
+    for (const drink of data.drinks) {
+      const brand = String(drink.brand || "").trim();
+      if (!brand) continue;
+      const entry = byBrand.get(brand) || { brand, rated: 0, total: 0, votes: 0, sum: 0 };
+      entry.total += 1;
+      const avg = averageFor(drink);
+      if (avg) {
+        entry.rated += 1;
+        entry.votes += avg.votes;
+        entry.sum += avg.value;
+      }
+      byBrand.set(brand, entry);
+    }
+    return [...byBrand.values()]
+      .filter((entry) => entry.rated > 0)
+      .map((entry) => {
+        const value = entry.sum / entry.rated;
+        const tier = data.tiers.find((item) => item.score === Math.round(value)) || data.tiers.at(-1);
+        return { ...entry, value, tier: tier?.id || "—" };
+      })
+      .sort(
+        (a, b) =>
+          b.value - a.value ||
+          b.votes - a.votes ||
+          b.rated - a.rated ||
+          a.brand.localeCompare(b.brand, "ru"),
+      );
+  };
+
   const ratingForView = (drink, view) => {
     if (view === "average") return averageFor(drink);
     const rating = drink.ratings?.[view];
@@ -196,6 +229,37 @@
       }).length;
       boardMeta.textContent = `найдено: ${shown} ${wordForm(shown, ["банка", "банки", "банок"])}`;
     }
+  };
+
+  const renderBrands = () => {
+    const section = document.getElementById("brands");
+    const list = document.getElementById("brand-list");
+    if (!section || !list) return;
+    const rows = brandRows();
+    section.hidden = !rows.length;
+    if (!rows.length) {
+      list.innerHTML = "";
+      return;
+    }
+    const maxScore = Math.max(1, ...data.tiers.map((tier) => tier.score));
+    list.innerHTML = rows
+      .map((row, index) => {
+        const models =
+          row.rated === row.total
+            ? `${row.rated} ${wordForm(row.rated, ["модель", "модели", "моделей"])}`
+            : `${row.rated} из ${row.total} ${wordForm(row.total, ["модели", "моделей", "моделей"])}`;
+        const votes = `${row.votes} ${wordForm(row.votes, ["голос", "голоса", "голосов"])}`;
+        return `
+        <li style="--i:${index}">
+          <button class="brand-row" type="button" data-brand="${esc(row.brand)}" title="Показать банки бренда ${esc(row.brand)}" style="--tier-color:${tierColor(row.tier)}">
+            <span class="brand-row__place">${String(index + 1).padStart(2, "0")}</span>
+            <span class="brand-row__name"><b>${esc(row.brand)}</b><small>${esc(`${models} · ${votes}`)}</small></span>
+            <span class="brand-row__meter" aria-hidden="true"><i style="--w:${Math.round((row.value / maxScore) * 100)}%"></i></span>
+            <span class="brand-row__score"><b>${row.value.toFixed(1)}</b><span>${esc(row.tier)}</span></span>
+          </button>
+        </li>`;
+      })
+      .join("");
   };
 
   const attachCards = () => {
@@ -396,6 +460,20 @@
       .forEach((chip) => chip.classList.toggle("is-active", chip === button));
     renderBoard();
   });
+  // Клик по бренду — быстрый переход к его банкам на «Сводном».
+  document.getElementById("brand-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-brand]");
+    if (!button) return;
+    activeView = "average";
+    tierFilter = "all";
+    document
+      .querySelectorAll("[data-tier-filter]")
+      .forEach((chip) => chip.classList.toggle("is-active", chip.dataset.tierFilter === "all"));
+    searchInput.value = button.dataset.brand;
+    searchQuery = button.dataset.brand;
+    renderBoard();
+    document.querySelector("#rating").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   // Закрытие только по клику в backdrop: у клавиатурного Enter/Space clientX/Y = 0,
   // и проверка координат ошибочно закрывала карточку.
   dialog.addEventListener("click", (event) => {
@@ -565,6 +643,7 @@
     const meta = document.querySelector('meta[name="description"]');
     if (meta && data.site?.description) meta.setAttribute("content", data.site.description);
     refreshChrome();
+    renderBrands();
     // диплинки: ?view=<username> — чей тирлист, /d/<slug> или ?drink=<slug> — сразу открыть карточку
     const params = new URLSearchParams(location.search);
     const view = params.get("view");
