@@ -176,3 +176,10 @@ test("главная: секция «Бренды» между столом и �
   assert.match(appSource, /renderBrands\(\);/);
   assert.match(stylesSource, /\.brand-row \{/);
 });
+
+test("доска: у активного участника ссылка «профиль →» остаётся читаемой", () => {
+  assert.match(
+    stylesSource,
+    /\.view-chip-wrap:has\(\.view-chip\.is-active\) \.view-chip__profile \{ color: var\(--ink\); \}/,
+  );
+});

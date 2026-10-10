@@ -106,8 +106,11 @@
            <small>титулы · ${esc(titles.month?.label || "")}</small>
            ${titles.items
              .map(
-               (title) =>
-                 `<span class="profile-title" title="${esc(title.hint || "")}">${esc(title.label)}</span>`,
+               (title) => `
+           <span class="profile-title-wrap">
+             <button class="profile-title" type="button" aria-label="${esc(title.label)}. ${esc(title.hint || "")}">${esc(title.label)}</button>
+             <span class="profile-tooltip" role="tooltip">${esc(title.hint || "")}</span>
+           </span>`,
              )
              .join("")}
          </p>`
@@ -303,6 +306,25 @@
     if (!link) return;
     event.preventDefault();
     openDrinkDialog(link.dataset.drink);
+  });
+
+  // Титулы: тап/клик открывает подсказку, клик мимо и Escape закрывают.
+  // Наведение и фокус с клавиатуры показывает ту же подсказку средствами CSS.
+  document.addEventListener("click", (event) => {
+    const chip = event.target.closest(".profile-title");
+    if (chip) {
+      const wrap = chip.closest(".profile-title-wrap");
+      document.querySelectorAll(".profile-title-wrap.is-open").forEach((open) => {
+        if (open !== wrap) open.classList.remove("is-open");
+      });
+      wrap?.classList.toggle("is-open");
+      return;
+    }
+    document.querySelectorAll(".profile-title-wrap.is-open").forEach((open) => open.classList.remove("is-open"));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll(".profile-title-wrap.is-open").forEach((open) => open.classList.remove("is-open"));
   });
 
   const cardTemplate = (rating, index = 0) => `

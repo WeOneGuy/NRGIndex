@@ -702,7 +702,12 @@ a.review-link { text-decoration: none; }
 .profile-role { margin: .8rem 0 0; color: var(--muted); font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; }
 .profile-titles { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .45rem; margin: .7rem 0 0; }
 .profile-titles small { color: var(--muted); font-size: .5rem; letter-spacing: .14em; text-transform: uppercase; }
-.profile-title { padding: .28rem .6rem; border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent); border-radius: 999px; color: var(--orange); font-size: .55rem; letter-spacing: .1em; text-transform: uppercase; }
+.profile-title-wrap { position: relative; display: inline-flex; }
+.profile-title { padding: .28rem .6rem; border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent); border-radius: 999px; color: var(--orange); background: transparent; font: inherit; font-size: .55rem; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.profile-tooltip { position: absolute; left: 50%; bottom: calc(100% + .55rem); z-index: 6; width: max-content; max-width: min(18rem, 70vw); padding: .5rem .65rem; border: 1px solid var(--line); border-radius: .55rem; color: var(--paper); background: #201b18; box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .35); font-size: .58rem; line-height: 1.5; letter-spacing: .02em; text-align: left; transform: translate(-50%, .25rem); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .18s var(--ease), transform .18s var(--ease), visibility .18s; }
+.profile-tooltip::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: .32rem solid transparent; border-top-color: #201b18; }
+.profile-title-wrap:hover .profile-tooltip,
+.profile-title-wrap.is-open .profile-tooltip { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
 .profile-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 6rem; aspect-ratio: 1; border: 1px solid color-mix(in srgb, var(--person-color) 70%, white); border-radius: 50%; color: var(--person-color); background: color-mix(in srgb, var(--person-color) 10%, transparent); font: 600 1.5rem var(--sans); box-shadow: 0 0 3rem color-mix(in srgb, var(--person-color) 25%, transparent); }
 .profile-stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .profile-stats > div { padding: 1.1rem 1rem; border-right: 1px solid var(--line); }
@@ -832,6 +837,7 @@ a.drink-card { text-decoration: none; }
 .view-chip-wrap .view-chip { border-right: 0; flex: 1; }
 .view-chip__profile { position: absolute; right: .85rem; bottom: .05rem; color: inherit; font-size: .46rem; letter-spacing: .1em; text-transform: uppercase; text-decoration: none; opacity: .55; }
 .view-chip__profile:hover { opacity: 1; text-decoration: underline; }
+.view-chip-wrap:has(.view-chip.is-active) .view-chip__profile { color: var(--ink); }
 a.reviewer { color: inherit; text-decoration: none; }
 .reviewer__hint { display: block; margin-top: .25rem; font-size: .45rem; font-style: normal; letter-spacing: .12em; text-transform: uppercase; opacity: .45; }
 a.reviewer:hover .reviewer__hint { opacity: 1; }

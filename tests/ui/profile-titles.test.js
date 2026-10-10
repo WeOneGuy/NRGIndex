@@ -27,3 +27,20 @@ test("профиль: ежемесячные титулы рендерятся �
 test("профиль: пустой набор титулов ничего не рисует", () => {
   assert.match(read("public/profile.js"), /titles\?\.items\?\.length/);
 });
+
+test("профиль: подсказка титула открывается наведением и тапом", () => {
+  const js = read("public/profile.js");
+  const css = read("public/styles.css");
+  assert.match(js, /class="profile-title-wrap"/);
+  assert.match(js, /<button class="profile-title" type="button" aria-label=/);
+  assert.match(js, /class="profile-tooltip" role="tooltip"/);
+  assert.doesNotMatch(js, /profile-title" title=/);
+  assert.match(js, /closest\("\.profile-title"\)/);
+  assert.match(js, /classList\.toggle\("is-open"\)/);
+  assert.match(js, /event\.key !== "Escape"/);
+  assert.match(css, /\.profile-title-wrap \{ position: relative;/);
+  assert.match(css, /\.profile-title-wrap:hover \.profile-tooltip,/);
+  assert.match(css, /\.profile-title-wrap\.is-open \.profile-tooltip/);
+  // фокус после тапа не должен удерживать подсказку: закрытие по Escape/повторному тапу
+  assert.doesNotMatch(css, /profile-title-wrap:focus-within/);
+});
