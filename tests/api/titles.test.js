@@ -2,21 +2,8 @@ const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer, createUser, request } = require("../helpers");
 
-const MONTHS = [
-  "январь",
-  "февраль",
-  "март",
-  "апрель",
-  "май",
-  "июнь",
-  "июль",
-  "август",
-  "сентябрь",
-  "октябрь",
-  "ноябрь",
-  "декабрь",
-];
-// Прошлый месяц задаём от начала текущего — без «N дней назад».
+// Прошлый месяц задаём от начала текущего — оценки и банки давностью больше
+// месяца должны идти в зачёт: титулы считаются по всей истории.
 const OLD_MONTH = "datetime('now', 'start of month', '-1 day')";
 
 let ctx;
@@ -39,13 +26,14 @@ const insertRating = (db, drinkId, userId, tier, review = "", { old = false } = 
     )
     .run(drinkId, userId, tier, review);
 
-const fetchTitles = async (base, username) => {
+const fetchProfile = async (base, username) => {
   const res = await request(base, "GET", `/api/public/profile/${username}`);
   assert.equal(res.status, 200, `профиль ${username} должен открываться`);
-  return res.json.titles;
+  return res.json;
 };
-
+const fetchTitles = async (base, username) => (await fetchProfile(base, username)).titles;
 const itemIds = (titles) => titles.items.map((item) => item.id);
+const byId = (titles) => Object.fromEntries(titles.items.map((item) => [item.id, item]));
 
 before(async () => {
   ctx = await startServer();
@@ -81,7 +69,7 @@ before(async () => {
   insertRating(ctx.db, drinks.d5, ids.boris, "S", "Топ");
   insertRating(ctx.db, drinks.hidden, ids.sanya, "S", "х".repeat(100));
 
-  // lastmonth: своя старая банка и своя старая оценка — в текущий месяц не идут.
+  // lastmonth: своя старая банка и своя старая оценка — в зачёт идут, титулов не дают.
   drinks.old = insertDrink(ctx.db, "old-bank", ids.lastmonth, { old: true });
   insertRating(ctx.db, drinks.old, ids.lastmonth, "S", "Старый отзыв", { old: true });
 });
@@ -90,70 +78,93 @@ after(async () => {
   await ctx.close();
 });
 
-test("титулы: семь титулов за месяц, порядок и подписи", async () => {
+test("титулы: считаются по всей истории и совпадают с цифрами профиля", async () => {
   const sanya = await fetchTitles(ctx.base, "sanya");
-  assert.deepEqual(itemIds(sanya), ["rater", "detailed", "discoverer", "rebel"]);
-  const byId = Object.fromEntries(sanya.items.map((item) => [item.id, item]));
-  assert.equal(byId.rater.label, "Главный оцениватель");
-  assert.equal(byId.rater.hint, "Больше всех оценок за месяц: 4");
-  assert.equal(byId.detailed.label, "Самый подробный");
+  assert.deepEqual(itemIds(sanya), ["rater", "detailed", "discoverer"]);
+  const sanyaById = byId(sanya);
+  assert.equal(sanyaById.rater.hint, "Больше всех оценок: 4");
   // 41 знак: скрытая банка и её отзыв в 100 знаков не в счёте.
-  assert.match(byId.detailed.hint, /41/);
-  assert.equal(byId.discoverer.label, "Первооткрыватель");
-  assert.equal(byId.discoverer.hint, "Больше всех новых банок: 3");
-  assert.equal(byId.rebel.label, "Бунтарь");
-  assert.match(byId.rebel.hint, /59/);
+  assert.match(sanyaById.detailed.hint, /41/);
+  assert.equal(sanyaById.discoverer.hint, "Больше всех новых банок: 3");
 
   const kira = await fetchTitles(ctx.base, "kira");
   assert.deepEqual(itemIds(kira), ["rater", "voice", "strict"]);
-  const kiraById = Object.fromEntries(kira.items.map((item) => [item.id, item]));
-  assert.equal(kiraById.rater.hint, "Больше всех оценок за месяц: 4");
-  assert.equal(kiraById.voice.label, "Голос стола");
+  const kiraById = byId(kira);
   assert.equal(kiraById.voice.hint, "Согласие со столом 63%");
-  assert.equal(kiraById.strict.label, "Самый строгий");
   assert.equal(kiraById.strict.hint, "Средний балл 3,3 — ниже всех");
 
   const boris = await fetchTitles(ctx.base, "boris");
   assert.deepEqual(itemIds(boris), ["voice", "generous"]);
-  const borisById = Object.fromEntries(boris.items.map((item) => [item.id, item]));
+  const borisById = byId(boris);
   assert.equal(borisById.voice.hint, "Согласие со столом 63%");
-  assert.equal(borisById.generous.label, "Самый щедрый");
   assert.equal(borisById.generous.hint, "Средний балл 4,5 — выше всех");
 });
 
-test("титулы: ничьи отдают титул всем лидерам", async () => {
+test("титулы: строгий и щедрый — та же средняя, что в статистике профиля", async () => {
   const profiles = {};
   for (const username of ["sanya", "kira", "boris", "marat"]) {
-    profiles[username] = await fetchTitles(ctx.base, username);
+    profiles[username] = await fetchProfile(ctx.base, username);
   }
-  // sanya и kira — по 4 оценки, оба «Главные оцениватели».
-  assert.deepEqual(itemIds(profiles.sanya).filter((id) => id === "rater"), ["rater"]);
-  assert.deepEqual(itemIds(profiles.kira).filter((id) => id === "rater"), ["rater"]);
-  assert.ok(!itemIds(profiles.boris).includes("rater"));
-  // kira и boris — согласие 63%, оба «Голоса стола»; «Бунтарь» только у sanya (59%).
-  assert.ok(itemIds(profiles.kira).includes("voice"));
-  assert.ok(itemIds(profiles.boris).includes("voice"));
-  assert.ok(!itemIds(profiles.sanya).includes("voice"));
-  const rebels = Object.entries(profiles)
-    .filter(([, titles]) => itemIds(titles).includes("rebel"))
-    .map(([username]) => username);
-  assert.deepEqual(rebels, ["sanya"]);
-  // sanya со средним 3,5 — не край, extremes не его.
-  assert.ok(!itemIds(profiles.sanya).includes("strict"));
-  assert.ok(!itemIds(profiles.sanya).includes("generous"));
+  assert.equal(profiles.kira.stats.average, 3.25);
+  const eligible = Object.entries(profiles)
+    .filter(([, profile]) => profile.stats.ratings >= 2)
+    .sort((a, b) => a[1].stats.average - b[1].stats.average);
+  assert.equal(eligible[0][0], "kira", "самый строгий — у минимальной средней");
+  assert.equal(eligible.at(-1)[0], "boris", "самый щедрый — у максимальной средней");
+  assert.equal(byId(profiles.kira.titles).strict.hint, "Средний балл 3,3 — ниже всех");
 });
 
-test("титулы: месяц, пустые участники и прошлый месяц", async () => {
-  const now = new Date();
-  const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+test("титулы: больше трёх одному не достаётся, лишний не уходит следующему", async () => {
+  const all = {};
+  for (const username of ["sanya", "kira", "boris", "marat", "newbie", "lastmonth"]) {
+    all[username] = await fetchTitles(ctx.base, username);
+  }
+  for (const [username, titles] of Object.entries(all)) {
+    assert.ok(titles.items.length <= 3, `${username}: не больше трёх титулов`);
+  }
+  // sanya — лидер и по худшему согласию (59%), но у него уже три титула:
+  // «бунтарь» не вручается никому, а не уходит следующему по метрике.
+  assert.deepEqual(itemIds(all.sanya), ["rater", "detailed", "discoverer"]);
+  assert.ok(!Object.values(all).some((titles) => itemIds(titles).includes("rebel")));
+});
+
+test("титулы: ничьи отдают титул всем лидерам", async () => {
   const sanya = await fetchTitles(ctx.base, "sanya");
-  assert.deepEqual(sanya.month, { key: monthKey, label: MONTHS[now.getUTCMonth()] });
-  // marat — 1 оценка (не максимум, пороги не взяты), newbie — пусто,
-  // lastmonth — только прошлый месяц.
+  const kira = await fetchTitles(ctx.base, "kira");
+  const boris = await fetchTitles(ctx.base, "boris");
+  // sanya и kira — по 4 оценки, оба «Главные оцениватели».
+  assert.ok(itemIds(sanya).includes("rater"));
+  assert.ok(itemIds(kira).includes("rater"));
+  assert.ok(!itemIds(boris).includes("rater"));
+  // kira и boris — согласие 63%, оба «Голоса стола».
+  assert.ok(itemIds(kira).includes("voice"));
+  assert.ok(itemIds(boris).includes("voice"));
+});
+
+test("титулы: пустые и старые участники без титулов", async () => {
+  // marat — 1 оценка (пороги не взяты), newbie — пусто,
+  // lastmonth — одна старая оценка и одна старая банка.
   for (const username of ["marat", "newbie", "lastmonth"]) {
-    const titles = await fetchTitles(ctx.base, username);
-    assert.deepEqual(titles.items, [], `${username} должен быть без титулов`);
-    assert.deepEqual(titles.month, { key: monthKey, label: MONTHS[now.getUTCMonth()] });
+    assert.deepEqual((await fetchTitles(ctx.base, username)).items, [], `${username} должен быть без титулов`);
+  }
+});
+
+test("титулы: оценки и банки прошлых месяцев идут в зачёт", async () => {
+  const old = await startServer();
+  try {
+    const user = await createUser(old.db, {
+      username: "oldmate",
+      password: "oldmate-pass-123",
+      displayName: "Старый",
+    });
+    const first = insertDrink(old.db, "o1", user.id, { old: true });
+    const second = insertDrink(old.db, "o2", user.id, { old: true });
+    insertRating(old.db, first, user.id, "A", "Давний отзыв", { old: true });
+    insertRating(old.db, second, user.id, "B", "Норм", { old: true });
+    const titles = await fetchTitles(old.base, "oldmate");
+    assert.deepEqual(itemIds(titles), ["rater", "detailed", "discoverer"]);
+  } finally {
+    await old.close();
   }
 });
 
@@ -180,13 +191,15 @@ test("титулы: тихий стол — одиночка без голоса
     assert.deepEqual(itemIds(firstOnly), ["rater", "detailed", "discoverer"]);
     assert.deepEqual((await fetchTitles(quiet.base, "second")).items, []);
 
-    // Оба ставят одинаковые оценки на те же банки: согласие 100%, минимум не меньше максимума.
+    // Оба ставят одинаковые оценки на те же банки: голос есть у обоих,
+    // но у «quiet» уже три титула — «голос стола» уходит только второму.
     insertRating(quiet.db, q1, second.id, "A");
     insertRating(quiet.db, q2, second.id, "B");
     const after = await fetchTitles(quiet.base, "quiet");
     const afterSecond = await fetchTitles(quiet.base, "second");
-    assert.ok(itemIds(after).includes("voice"));
-    assert.ok(itemIds(afterSecond).includes("voice"));
+    assert.deepEqual(itemIds(after), ["rater", "detailed", "discoverer"]);
+    assert.deepEqual(itemIds(afterSecond), ["rater", "voice"]);
+    // Средние совпали: минимум не меньше максимума, «бунтарь» никому не вручается.
     assert.ok(!itemIds(after).includes("rebel"));
     assert.ok(!itemIds(afterSecond).includes("rebel"));
   } finally {

@@ -1,23 +1,11 @@
-// Ежемесячные титулы профиля: считаются вживую за текущий календарный месяц (UTC)
-// по активным публичным участникам и опубликованным банкам. Ничьи — титул всем лидерам.
-
-const MONTHS = [
-  "январь",
-  "февраль",
-  "март",
-  "апрель",
-  "май",
-  "июнь",
-  "июль",
-  "август",
-  "сентябрь",
-  "октябрь",
-  "ноябрь",
-  "декабрь",
-];
+// Титулы профиля: считаются вживую по всей истории — по активным публичным
+// участникам и опубликованным банкам, ровно по тем же цифрам, что в статистике
+// профиля. Ничьи — титул всем лидерам. Одному человеку достаётся не больше
+// MAX_TITLES титулов: если все лидеры метрики уже набрали лимит, титул не вручается.
 
 const MIN_AVG_RATINGS = 2;
 const MIN_COMPARED = 2;
+const MAX_TITLES = 3;
 
 // Склонение существительного по числу — как wordForm в public/profile.js.
 const plural = (n, one, few, many) => {
@@ -28,11 +16,7 @@ const plural = (n, one, few, many) => {
 
 const avgFmt = (avg) => (Math.round(avg * 10) / 10).toFixed(1).replace(".", ",");
 
-function computeMonthlyTitles(db) {
-  const now = new Date();
-  const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-  const monthLabel = MONTHS[now.getUTCMonth()];
-
+function computeTitles(db) {
   const ratingRows = db
     .prepare(
       `SELECT r.user_id, r.drink_id, r.review, t.score
@@ -40,8 +24,7 @@ function computeMonthlyTitles(db) {
        JOIN tiers t ON t.id = r.tier_id
        JOIN drinks d ON d.id = r.drink_id
        JOIN users u ON u.id = r.user_id
-       WHERE u.is_active = 1 AND u.is_public = 1 AND d.is_published = 1
-         AND strftime('%Y-%m', r.updated_at) = strftime('%Y-%m', 'now')`,
+       WHERE u.is_active = 1 AND u.is_public = 1 AND d.is_published = 1`,
     )
     .all();
   const addedRows = db
@@ -49,7 +32,6 @@ function computeMonthlyTitles(db) {
       `SELECT created_by AS user_id, COUNT(*) AS n
        FROM drinks
        WHERE is_published = 1 AND created_by IS NOT NULL
-         AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
        GROUP BY created_by`,
     )
     .all();
@@ -98,48 +80,50 @@ function computeMonthlyTitles(db) {
   }
 
   const byUser = new Map();
-  const grant = (id, label, winners, hintOf) => {
+  const counts = new Map();
+  const entries = [...stats.entries()];
+
+  // Порядок вызовов grant() задаёт порядок титулов у человека. Лидеры метрики
+  // получают титул, пока не упёрлись в MAX_TITLES; если все лидеры упёрлись,
+  // титул не вручается никому — следующему по метрике его не отдаём.
+  const grant = (id, label, candidates, valueOf, mode, hintOf) => {
+    if (!candidates.length) return;
+    const values = candidates.map(valueOf);
+    const target = mode === "min" ? Math.min(...values) : Math.max(...values);
+    const winners = candidates
+      .filter((entry) => valueOf(entry) === target)
+      .filter(([userId]) => (counts.get(userId) || 0) < MAX_TITLES);
     for (const [userId, stat] of winners) {
+      counts.set(userId, (counts.get(userId) || 0) + 1);
       const items = byUser.get(userId) || [];
       items.push({ id, label, hint: hintOf(stat) });
       byUser.set(userId, items);
     }
   };
-  // Ничья — титул каждому лидеру; порядок grant() задаёт порядок items.
-  const leaders = (candidates, valueOf, mode = "max") => {
-    if (!candidates.length) return [];
-    const values = candidates.map(valueOf);
-    const target = mode === "min" ? Math.min(...values) : Math.max(...values);
-    return candidates.filter((entry) => valueOf(entry) === target);
-  };
-  const entries = [...stats.entries()];
 
   grant(
     "rater",
     "Главный оцениватель",
-    leaders(
-      entries.filter(([, stat]) => stat.ratings >= 1),
-      ([, stat]) => stat.ratings,
-    ),
-    (stat) => `Больше всех оценок за месяц: ${stat.ratings}`,
+    entries.filter(([, stat]) => stat.ratings >= 1),
+    ([, stat]) => stat.ratings,
+    "max",
+    (stat) => `Больше всех оценок: ${stat.ratings}`,
   );
   grant(
     "detailed",
     "Самый подробный",
-    leaders(
-      entries.filter(([, stat]) => stat.reviewChars > 0),
-      ([, stat]) => stat.reviewChars,
-    ),
+    entries.filter(([, stat]) => stat.reviewChars > 0),
+    ([, stat]) => stat.reviewChars,
+    "max",
     (stat) =>
       `Больше всех текста в отзывах: ${stat.reviewChars} ${plural(stat.reviewChars, "знак", "знака", "знаков")}`,
   );
   grant(
     "discoverer",
     "Первооткрыватель",
-    leaders(
-      entries.filter(([, stat]) => stat.added >= 1),
-      ([, stat]) => stat.added,
-    ),
+    entries.filter(([, stat]) => stat.added >= 1),
+    ([, stat]) => stat.added,
+    "max",
     (stat) => `Больше всех новых банок: ${stat.added}`,
   );
 
@@ -148,40 +132,47 @@ function computeMonthlyTitles(db) {
   grant(
     "voice",
     "Голос стола",
-    leaders(voiceSet, ([, stat]) => stat.agreement),
+    voiceSet,
+    ([, stat]) => stat.agreement,
+    "max",
     (stat) => `Согласие со столом ${stat.agreement}%`,
   );
   const voiceValues = voiceSet.map(([, stat]) => stat.agreement);
   const voiceSpread = voiceSet.length >= 2 && Math.min(...voiceValues) < Math.max(...voiceValues);
-  grant(
-    "rebel",
-    "Бунтарь",
-    voiceSpread ? leaders(voiceSet, ([, stat]) => stat.agreement, "min") : [],
-    (stat) => `Согласие со столом ${stat.agreement}% — реже всех`,
-  );
+  if (voiceSpread) {
+    grant(
+      "rebel",
+      "Бунтарь",
+      voiceSet,
+      ([, stat]) => stat.agreement,
+      "min",
+      (stat) => `Согласие со столом ${stat.agreement}% — реже всех`,
+    );
+  }
 
   const averaged = entries.filter(([, stat]) => stat.ratings >= MIN_AVG_RATINGS);
   const avgValues = averaged.map(([, stat]) => stat.avg);
   const avgSpread = averaged.length >= 2 && Math.min(...avgValues) < Math.max(...avgValues);
-  grant(
-    "generous",
-    "Самый щедрый",
-    avgSpread
-      ? leaders(
-          averaged,
-          ([, stat]) => stat.avg,
-        )
-      : [],
-    (stat) => `Средний балл ${avgFmt(stat.avg)} — выше всех`,
-  );
-  grant(
-    "strict",
-    "Самый строгий",
-    avgSpread ? leaders(averaged, ([, stat]) => stat.avg, "min") : [],
-    (stat) => `Средний балл ${avgFmt(stat.avg)} — ниже всех`,
-  );
+  if (avgSpread) {
+    grant(
+      "generous",
+      "Самый щедрый",
+      averaged,
+      ([, stat]) => stat.avg,
+      "max",
+      (stat) => `Средний балл ${avgFmt(stat.avg)} — выше всех`,
+    );
+    grant(
+      "strict",
+      "Самый строгий",
+      averaged,
+      ([, stat]) => stat.avg,
+      "min",
+      (stat) => `Средний балл ${avgFmt(stat.avg)} — ниже всех`,
+    );
+  }
 
-  return { monthKey, monthLabel, byUser };
+  return { byUser };
 }
 
-module.exports = { computeMonthlyTitles };
+module.exports = { computeTitles };

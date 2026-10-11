@@ -14,7 +14,7 @@ test("preview: TrueMark fields, proxy, full marking code and stale image guards"
   const sandbox = {
     barcodeBusy: false, autoScanGen: 1, camera: { mode: "code" }, pending: {},
     $: (id) => elements[id] ||= { open: true },
-    api: async () => data, setCameraStatus() {}, renderSimilar() {}, showDupAck() {}, showPreview() {}, refreshPhotos() {}, updatePreviewImage() {},
+    api: async () => data, setCameraStatus() {}, renderSimilar() {}, showAbsenceAck() {}, showPreview() {}, refreshPhotos() {}, updatePreviewImage() {},
     proxiedPhotoUrl: (url) => `api/cabinet/ai/photo-proxy?url=${encodeURIComponent(url)}`,
     processImageUrl: (url) => { imageUrl = url; return new Promise((resolve, reject) => { imageResolve = resolve; imageReject = reject; }); },
   };

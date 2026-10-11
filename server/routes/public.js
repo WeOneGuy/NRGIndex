@@ -17,7 +17,7 @@ const PROFILE_HISTORY_ACTIONS = [
 const PROFILE_HISTORY_LIMIT = 30;
 const { drinkImage } = require("../lib/assets");
 const { notFound } = require("../lib/errors");
-const { computeMonthlyTitles } = require("../lib/titles");
+const { computeTitles } = require("../lib/titles");
 
 function ratingsMap(db) {
   const rows = db
@@ -109,7 +109,7 @@ module.exports = (db) => {
       )
       .get(String(req.params.username || "").slice(0, 64));
     if (!user) throw notFound("Профиль не найден");
-    const monthly = computeMonthlyTitles(db);
+    const allTitles = computeTitles(db);
 
     const tiers = db.prepare("SELECT id, title, note, score FROM tiers ORDER BY position, id").all();
     const scoreOf = new Map(tiers.map((tier) => [tier.id, tier.score]));
@@ -289,10 +289,7 @@ module.exports = (db) => {
           lastAt: lastAt || null,
         },
       },
-      titles: {
-        month: { key: monthly.monthKey, label: monthly.monthLabel },
-        items: monthly.byUser.get(user.id) || [],
-      },
+      titles: { items: allTitles.byUser.get(user.id) || [] },
       ratings,
       history,
     });

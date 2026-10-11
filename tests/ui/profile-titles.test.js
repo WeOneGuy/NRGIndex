@@ -6,7 +6,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..", "..");
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
-test("профиль: ежемесячные титулы рендерятся возле имени", () => {
+test("профиль: титулы рендерятся возле имени", () => {
   const js = read("public/profile.js");
   const css = read("public/styles.css");
   assert.match(js, /const renderHero = \(\{ profile, stats, tiers, titles \}\)/);
@@ -14,7 +14,7 @@ test("профиль: ежемесячные титулы рендерятся �
   assert.match(js, /titles\.items/);
   assert.match(js, /esc\(title\.label\)/);
   assert.match(js, /esc\(title\.hint/);
-  assert.match(js, /титулы · \$\{esc\(titles\.month\?\.label/);
+  assert.match(js, /<small>титулы<\/small>/);
   // строка титулов — между именем и должностью
   const h1 = js.indexOf("<h1>${esc(profile.name)}</h1>");
   const titles = js.indexOf("${titlesMarkup}");

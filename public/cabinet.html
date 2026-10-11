@@ -82,20 +82,6 @@
       </div>
 
       <div id="cab-panel-add" role="tabpanel" aria-labelledby="cab-tab-add">
-        <section class="dup-gate" id="dup-gate" aria-label="Проверка дубля">
-          <h3>Проверь, нет ли такой банки в индексе</h3>
-          <p class="hint">Если банка уже есть — открой её здесь и поставь тир, заводить заново не нужно.</p>
-          <label class="board-search dup-gate__search">
-            <span aria-hidden="true">⌕</span>
-            <input id="dup-gate-search" type="search" placeholder="Проверить: бренд, название или вкус…" autocomplete="off" aria-label="Поиск по индексу перед добавлением">
-          </label>
-          <div class="dup-gate__results" id="dup-gate-results" hidden></div>
-          <label class="dup-gate__ack" id="dup-gate-ack-wrap" hidden>
-            <input type="checkbox" id="dup-gate-ack">
-            Такого энергоса нет в списке — добавляю новую банку
-          </label>
-          <p class="form-status" id="dup-gate-status" aria-live="polite"></p>
-        </section>
         <form class="cabinet-form smart-form" id="smart-form" autocomplete="off">
           <h3>Новый энергос</h3>
           <p class="hint">Опиши банку словами или надиктуй голосом — ИИ разложит по полям бренд, вкус и издание, а отзыв и тир возьмёт только из того, что ты сам сказал. Фото можно снять камерой или найти отдельно.</p>
@@ -115,15 +101,6 @@
           </div>
           <button class="btn btn--big" type="submit" id="btn-smart" disabled>✦ Обработать</button>
           <p class="form-status" id="smart-status" aria-live="polite"></p>
-
-          <div class="similar-box" id="similar-box" hidden>
-            <p class="similar-box__title">Похоже, такая банка уже в индексе — может, просто оценить её?</p>
-            <div id="similar-list"></div>
-            <label class="similar-box__ack" id="similar-ack-wrap" hidden>
-              <input type="checkbox" id="similar-ack">
-              Это не тот энергос — добавить новую банку
-            </label>
-          </div>
 
           <div class="parsed-card" id="smart-preview" hidden>
             <div class="parsed-card__media">
@@ -149,6 +126,18 @@
               <button class="btn btn--ghost" type="button" id="btn-retry-photo">Следующее фото</button>
               <button class="btn btn--ghost" type="button" id="btn-redraw" title="Перерисовать банку через Gemini: прямой ракурс, ровный фон. Жмите, если ракурс плохой или фон удалился криво">🍌 Перерисовать</button>
             </div>
+            <div class="similar-box" id="similar-box" hidden>
+              <p class="similar-box__title">Похоже, такая банка уже в индексе — может, просто оценить её?</p>
+              <div id="similar-list"></div>
+              <label class="dup-ack" id="similar-ack-wrap" hidden>
+                <input type="checkbox" id="similar-ack">
+                Это не тот энергос — добавить новую банку
+              </label>
+            </div>
+            <label class="dup-ack" id="absence-ack-wrap" hidden>
+              <input type="checkbox" id="absence-ack">
+              Такого энергоса нет в списке — добавляю новую банку
+            </label>
             <p class="hint parsed-card__note" id="parsed-save-note">Сохраним всё разом: бренд, название, вкус, издание, тир, отзыв и фото выше.</p>
             <p class="hint parsed-card__note">🍌 «Перерисовать» — жмите, если ракурс плохой или фон удалился криво.</p>
           </div>

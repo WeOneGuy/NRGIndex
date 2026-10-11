@@ -102,8 +102,8 @@
             ? "в целом согласен со столом"
             : "идёт против стола";
     const titlesMarkup = titles?.items?.length
-      ? `<p class="profile-titles" aria-label="Титулы месяца">
-           <small>титулы · ${esc(titles.month?.label || "")}</small>
+      ? `<p class="profile-titles" aria-label="Титулы">
+           <small>титулы</small>
            ${titles.items
              .map(
                (title) => `
