@@ -30,6 +30,7 @@ before(async () => {
   cookie = (await login(ctx.base, "sanya", "sanya-pass-123")).cookie;
   insertDrink({ slug: "burn-tropic", brand: "Burn", name: "Tropic", flavor: "манго", barcode: "4680036912629" });
   insertDrink({ slug: "monster-ultra", brand: "Monster", name: "Ultra", flavor: "цитрус", is_published: 0 });
+  insertDrink({ slug: "torq-energy", brand: "TORQ", name: "TORQ Energy" });
 });
 
 after(async () => {
@@ -91,4 +92,10 @@ test("после подтверждения штрих-кода банка вс�
     confirmDifferent: true,
   });
   assert.equal(res.status, 201);
+});
+
+test("опечатка бренда без штрих-кода всё равно ловится", async () => {
+  const res = await add({ brand: "Торк", name: "TORQ Original", tier: "B" });
+  assert.equal(res.status, 409);
+  assert.ok(res.json.similar.some((drink) => drink.slug === "torq-energy"));
 });

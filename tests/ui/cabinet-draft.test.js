@@ -32,7 +32,7 @@ test("при входе черновик восстанавливается, д�
   assert.match(js, /const restoreDraft = \(\) =>/);
   assert.match(js, /await refreshAll\(\);\s*\n\s*restoreDraft\(\)/);
   assert.match(js, /pending\.similarCount = 0/);
-  assert.match(js, /showAbsenceAck\(\)/);
+  assert.match(js, /pending\.duplicateAck = true/);
   assert.match(js, /Черновик восстановлен/);
 });
 

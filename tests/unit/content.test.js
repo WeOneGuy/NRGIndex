@@ -30,6 +30,10 @@ const DB = makeDb([
   row(4, "gorilla-mango", "Gorilla", "Gorilla Mango", "манго"),
   row(5, "red-bull-blueberry", "Ред Булл", "Ред Булл Original", "черника"),
   row(6, "hidden-volt", "Volt", "Volt Hidden", "манго", { is_published: 0 }),
+  row(7, "adrenaline-rush", "Adrenaline Rush", "Adrenaline Rush", ""),
+  row(8, "torq-energy", "TORQ", "TORQ Energy", ""),
+  row(9, "flash-up", "Flash Up", "Flash Up Energy", "клубника"),
+  row(10, "burn-tropic", "Burn", "Burn Tropical Mix", "тропический микс"),
 ]);
 
 test("matchWords: регистр, ё, транслит, без объёмов и шума", () => {
@@ -89,4 +93,23 @@ test("findSimilarDrinks: скрытые банки видны только с in
   const hidden = findSimilarDrinks(DB, query, { includeHidden: true }).find((hit) => hit.slug === "hidden-volt");
   assert.ok(hidden);
   assert.equal(hidden.hidden, true);
+});
+
+test("findSimilarDrinks: STT-опечатки и транслит бренда ловит Левенштейн", () => {
+  assert.equal(findSimilarDrinks(DB, { brand: "Бёрн", name: "Burn Apple Kiwi" })[0]?.slug, "burn-apple-kiwi");
+  assert.equal(findSimilarDrinks(DB, { brand: "Берн", name: "Burn Apple Kiwi" })[0]?.slug, "burn-apple-kiwi");
+  assert.equal(findSimilarDrinks(DB, { brand: "Торк", name: "TORQ Original" })[0]?.slug, "torq-energy");
+  assert.equal(findSimilarDrinks(DB, { brand: "Флэш Ап", name: "клубника" })[0]?.slug, "flash-up");
+});
+
+test("findSimilarDrinks: перепутанные поля не мешают найти дубль", () => {
+  assert.equal(
+    findSimilarDrinks(DB, { brand: "Burn Tropical Mix", name: "Burn Tropical Mix" })[0]?.slug,
+    "burn-tropic",
+  );
+  assert.equal(findSimilarDrinks(DB, { brand: "Adrenaline", name: "Rush" })[0]?.slug, "adrenaline-rush");
+  assert.equal(
+    findSimilarDrinks(DB, { brand: "adrenaline rush", name: "Adrenaline Rush" })[0]?.slug,
+    "adrenaline-rush",
+  );
 });

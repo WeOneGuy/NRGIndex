@@ -71,7 +71,6 @@
     userPhoto: false,
     similarCount: 0, // сколько похожих банок нашёл ИИ
     duplicateAck: true, // «это не он» — без этого новую банку не сохраняем
-    absenceAck: false, // «такого нет в списке» — подтверждение после неудачных поисков
     barcode: "",
     rawCode: "",
   };
@@ -1805,7 +1804,6 @@
     // Согласие на дубль не восстанавливаем: пусть человек заново проверит список.
     pending.similarCount = 0;
     pending.duplicateAck = true;
-    pending.absenceAck = false;
     // Фото/код без разобранных полей — открываем карточку с пустыми полями, как после скана.
     if (!pending.parsed && (pending.image || pending.barcode)) {
       pending.parsed = { brand: "", name: "", flavor: "", edition: "", tier: "B", tierGuessed: true, review: "" };
@@ -1817,9 +1815,8 @@
       return;
     }
     showPreview();
-    showAbsenceAck();
     $("smart-status").textContent =
-      "Черновик восстановлен — подтверди галочкой под кнопкой «В индекс ✓», что этой банки нет. Отменить можно там же.";
+      "Черновик восстановлен — проверь поля и жми «В индекс ✓». Отменить можно там же.";
   };
 
   window.addEventListener("beforeunload", saveDraft);
@@ -1849,34 +1846,15 @@
     $("camera-code").value = "";
     setCameraStatus("");
     renderSimilar([]);
-    hideAbsenceAck();
     clearVoice("smart");
     clearDraft();
   };
 
-  // Подтверждение «такого нет в списке» показываем только после неудачных
-  // автоматических проверок (ИИ-разбор, штрих-код) или при попытке сохранить
-  // без единой проверки. Когда совпадение найдено, работает галочка
-  // «это не тот энергос» — обе живут в карточке у кнопки «В индекс ✓».
+  // Галочка «это не тот энергос» — единственный гейт: кнопка заблокирована, пока
+  // найдены похожие и человек не подтвердил, что его банка другая. Когда совпадений
+  // нет, ничего не спрашиваем — сохранение проходит сразу.
   const syncConfirmState = () => {
-    const similarBlock = pending.similarCount > 0 && !pending.duplicateAck;
-    const absenceBlock =
-      pending.similarCount === 0 && !pending.absenceAck && !$("absence-ack-wrap").hidden;
-    $("btn-confirm").disabled = similarBlock || absenceBlock;
-  };
-
-  const showAbsenceAck = () => {
-    // Когда похожие найдены, работает своя галочка «это не тот энергос».
-    if (pending.similarCount) return;
-    $("absence-ack-wrap").hidden = false;
-    syncConfirmState();
-  };
-
-  const hideAbsenceAck = () => {
-    $("absence-ack-wrap").hidden = true;
-    $("absence-ack").checked = false;
-    pending.absenceAck = false;
-    syncConfirmState();
+    $("btn-confirm").disabled = pending.similarCount > 0 && !pending.duplicateAck;
   };
 
   // Если ИИ распознал банку, которая уже есть в индексе, — предлагаем оценить её,
@@ -1888,8 +1866,6 @@
     box.hidden = !similar.length;
     $("similar-ack").checked = false;
     $("similar-ack-wrap").hidden = !similar.length;
-    // Похожие найдены — подтверждение «нет в списке» не нужно, хватит «это не тот».
-    if (similar.length) hideAbsenceAck();
     // Пока похожие не подтверждены «это не он», кнопка «В индекс» заблокирована.
     syncConfirmState();
     if (!similar.length) {
@@ -1952,7 +1928,6 @@
         pending.parsed = { brand: "", name: "", flavor: "", edition: "", tier: "B", tierGuessed: true, review: "" };
         pending.photoNote = "отсканирован код — заполни бренд и название";
         renderSimilar([]);
-        showAbsenceAck();
         showPreview();
         // lookupBarcode гоняют в изоляции (vm) без остального IIFE — зовём аккуратно.
         if (typeof scheduleDraftSave === "function") scheduleDraftSave();
@@ -1972,8 +1947,6 @@
       };
       pending.photoNote = data.inIndex ? "банка уже в индексе" : "фото не нашлось — ищу по названию";
       renderSimilar(data.similar || []);
-      // Код не нашёлся в индексе — неудачная попытка, просим подтвердить отсутствие.
-      if (!(data.similar || []).length) showAbsenceAck();
       if (data.product?.image) {
         const label = { truemark: "TrueMark", openfoodfacts: "Open Food Facts", index: "индекса", crpt: "Честного знака" }[data.product.source] || "источника";
         const selection = pending.parsed;
@@ -2697,12 +2670,6 @@
     syncConfirmState();
   });
 
-  // Галочка «такого энергоса нет в списке» живёт в карточке у кнопки «В индекс ✓».
-  $("absence-ack").addEventListener("change", (event) => {
-    pending.absenceAck = event.target.checked;
-    syncConfirmState();
-  });
-
   let smartBusy = false;
   const updateSmartButton = () => {
     $("btn-smart").disabled = smartBusy || !$("smart-input").value.trim();
@@ -2742,8 +2709,6 @@
       const { parsed, similar } = await api("POST", "api/cabinet/ai/parse", body);
       pending.parsed = parsed;
       renderSimilar(similar || []);
-      // Разбор не нашёл похожих — показываем подтверждение «такого нет в списке».
-      if (!(similar || []).length) showAbsenceAck();
       // Фото из QR/камеры/ленты остаётся выбранным; автоподбор ленты — только когда фото нет.
       if (!pending.userPhoto && pending.photoSource === "auto") {
         pending.image = null;
@@ -2761,8 +2726,6 @@
         pending.parsed = { brand: "", name: "", flavor: "", edition: "", tier: "B", tierGuessed: true, review: "" };
       }
       renderSimilar([]);
-      // Разбор не удался — это тоже неудачная попытка, просим подтвердить отсутствие.
-      showAbsenceAck();
       showPreview();
       scheduleDraftSave();
       $("smart-status").textContent = `${error.message}. Заполни поля в карточке и жми «В индекс ✓».`;
@@ -2785,16 +2748,6 @@
     const parsed = readPreviewFields();
     if (!parsed.brand || !parsed.name) {
       $("smart-status").textContent = "Нужны хотя бы бренд и название.";
-      return;
-    }
-    // Автоматической проверки не было, «нет в списке» не подтверждали — показываем
-    // галочку (она появляется после неудачных проверок ИИ или штрих-кода).
-    if (!pending.similarCount && !pending.absenceAck) {
-      showAbsenceAck();
-      $("absence-ack-wrap").scrollIntoView({ behavior: "smooth", block: "center" });
-      $("absence-ack").focus();
-      $("smart-status").textContent =
-        "Проверь: если такой банки точно нет — отметь галочку под кнопкой и жми «В индекс ✓» ещё раз.";
       return;
     }
     $("btn-confirm").disabled = true;

@@ -6,55 +6,42 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..", "..");
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
-test("кабинет: отдельного блока проверки сверху нет, форма и камера на месте", () => {
+test("кабинет: блока проверки сверху и подтверждения «такого нет» больше нет", () => {
   const js = read("public/cabinet.js");
   const html = read("public/cabinet.html");
   assert.doesNotMatch(html, /dup-gate/, "гейт-контейнер удалён");
   assert.doesNotMatch(js, /dup-gate/, "из скрипта убраны ссылки на гейт");
-  assert.doesNotMatch(js, /renderDupGateResults|DUP_GATE_PAGE/, "ручной поиск по индексу удалён");
+  assert.doesNotMatch(html, /absence-ack/, "галочка «такого нет» удалена из разметки");
+  assert.doesNotMatch(js, /absenceAck|showAbsenceAck|hideAbsenceAck/, "логика «такого нет» удалена");
+  assert.doesNotMatch(html, /Такого энергоса нет в списке/, "текста подтверждения отсутствия нет");
   assert.doesNotMatch(html, /id="smart-form"[^>]*hidden/, "форма добавления не прячется");
   assert.match(html, /id="btn-camera"/, "кнопка камеры остаётся на месте");
   assert.match(html, /data-camera-mode="code"/, "режим скана штрих-кода остаётся");
 });
 
-test("предупреждение и подтверждение живут в карточке у кнопки «В индекс»", () => {
+test("предупреждение о совпадении живёт в карточке у кнопки «В индекс»", () => {
   const html = read("public/cabinet.html");
   const previewStart = html.indexOf('id="smart-preview"');
   assert.notEqual(previewStart, -1);
   const preview = html.slice(previewStart, html.indexOf("</form>", previewStart));
-  for (const id of ["similar-box", "similar-ack", "absence-ack", "absence-ack-wrap"]) {
+  for (const id of ["similar-box", "similar-ack", "similar-ack-wrap"]) {
     assert.ok(preview.includes(`id="${id}"`), `${id} должен быть в карточке превью`);
   }
-  const confirm = preview.indexOf('id="btn-confirm"');
-  assert.ok(preview.indexOf('id="similar-box"') > confirm, "предупреждение о совпадении — под кнопкой");
-  assert.ok(preview.indexOf('id="absence-ack-wrap"') > confirm, "галочка отсутствия — под кнопкой");
+  assert.ok(
+    preview.indexOf('id="similar-box"') > preview.indexOf('id="btn-confirm"'),
+    "предупреждение о совпадении — под кнопкой",
+  );
   assert.match(html, /id="similar-box"[^>]*hidden/, "предупреждение скрыто по умолчанию");
   assert.match(html, /id="similar-ack-wrap"[^>]*hidden/, "галочка «это не он» скрыта по умолчанию");
-  assert.match(html, /id="absence-ack-wrap"[^>]*hidden/, "галочка отсутствия скрыта по умолчанию");
 });
 
-test("предупреждение — только при совпадении, подтверждение — только при отсутствии", () => {
+test("гейт кнопки — только по найденным совпадениям", () => {
   const js = read("public/cabinet.js");
   assert.match(js, /pending\.similarCount = similar\.length/);
   assert.match(js, /pending\.duplicateAck = !similar\.length/);
-  assert.match(js, /if \(similar\.length\) hideAbsenceAck\(\)/);
-  assert.match(js, /const showAbsenceAck = \(\) =>/);
-  assert.match(js, /const hideAbsenceAck = \(\) =>/);
-  assert.match(js, /if \(pending\.similarCount\) return;/);
-});
-
-test("галочка отсутствия появляется после неудачных автоматических проверок", () => {
-  const js = read("public/cabinet.js");
-  // ИИ-разбор не нашёл похожих
-  assert.match(js, /if \(!\(similar \|\| \[\]\)\.length\) showAbsenceAck\(\)/);
-  // штрих-код не нашёлся в индексе
-  assert.match(js, /if \(!\(data\.similar \|\| \[\]\)\.length\) showAbsenceAck\(\)/);
-  // попытка сохранить без проверки тоже показывает галочку
-  assert.match(js, /!pending\.similarCount && !pending\.absenceAck/);
-  // подтверждение обязательно для сохранения и сбрасывается после добавления
-  assert.match(js, /pending\.absenceAck = event\.target\.checked/);
+  assert.match(js, /btn-confirm"\)\.disabled = pending\.similarCount > 0 && !pending\.duplicateAck/);
+  assert.match(js, /similar-ack"\)\.addEventListener\("change"/);
   assert.match(js, /const syncConfirmState = \(\) =>/);
-  assert.match(js, /hideAbsenceAck\(\)/);
 });
 
 test("кабинет: подтверждение разных энергосов уходит на сервер, 409 показывает похожие", () => {
