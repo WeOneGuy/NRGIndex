@@ -26,7 +26,7 @@
     return json;
   };
 
-  const state = { me: null, data: null, tab: "drinks", drinksSort: "id-desc", removeImage: false, stats: null, statsDays: 30 };
+  const state = { me: null, data: null, tab: "drinks", drinksSort: "id-desc", removeImage: false, stats: null, statsDays: 30, database: null };
   // Исходник фото ДО вырезания фона (строго JPEG) — для отправки в Nano Banana.
   // Заполняется при выборе файла/ссылки/ленты; для уже сохранённого фото оригинала
   // нет — тогда шлём текущее с пометкой.
@@ -82,11 +82,12 @@
     document.querySelectorAll("#admin-tabs .btn").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.tab === tab);
     });
-    for (const name of ["drinks", "tiers", "users", "settings", "audit", "logs", "stats"]) {
+    for (const name of ["drinks", "tiers", "users", "settings", "audit", "logs", "stats", "database"]) {
       $(`tab-${name}`).hidden = name !== tab;
     }
     render();
     if (tab === "stats") loadStats();
+    if (tab === "database") loadDatabase();
   };
 
   const render = () => {
@@ -96,6 +97,7 @@
     else if (state.tab === "settings") renderSettings();
     else if (state.tab === "stats") renderStats();
     else if (state.tab === "logs") renderLogs();
+    else if (state.tab === "database") renderDatabase();
     else renderAudit();
   };
 
@@ -1824,6 +1826,196 @@
   setInterval(() => {
     if (state.tab === "stats" && document.visibilityState === "visible") loadStats({ refresh: true });
   }, 60_000);
+
+  /* ---------- база данных ---------- */
+  const DB_NOTES = {
+    users: "участники, роли, вход",
+    sessions: "сессии входа (токен sha256)",
+    tiers: "тиры S–D и баллы",
+    drinks: "банки индекса",
+    drink_relations: "связи «похожих» банок",
+    ratings: "оценки: тир + отзыв",
+    settings: "настройки ключ → значение",
+    audit_log: "журнал действий и откатов",
+    login_attempts: "попытки входа (антибрутфорс)",
+    ai_usage: "ИИ-запросы: токены и цена",
+  };
+  // Раскладка карты: таблица → [колонка]. Порядок в колонке — по строкам ниже.
+  const DB_LAYOUT = {
+    sessions: [0, 0],
+    users: [0, 1],
+    ai_usage: [0, 2],
+    audit_log: [0, 3],
+    tiers: [1, 0],
+    ratings: [1, 1],
+    settings: [2, 0],
+    drinks: [2, 1],
+    drink_relations: [2, 2],
+    login_attempts: [2, 3],
+  };
+  const fmtBytes = (bytes) =>
+    bytes >= 1024 * 1024
+      ? `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} МБ`
+      : `${fmtNumber(Math.max(1, Math.round(bytes / 1024)))} КБ`;
+
+  const dbCard = (table) => {
+    const fkByColumn = new Map(table.foreignKeys.map((fk) => [fk.column, fk]));
+    const rows = table.columns
+      .map((column) => {
+        const fk = fkByColumn.get(column.name);
+        return `
+        <li${fk ? ` title="${esc(`ссылка на ${fk.table}.${fk.columnTo}`)}"` : ""}>
+          <code>${esc(column.name)}</code>
+          ${column.pk ? `<i class="db-badge db-badge--pk">PK</i>` : ""}
+          ${fk ? `<i class="db-badge db-badge--fk">FK</i>` : ""}
+          ${column.unique && !column.pk ? `<i class="db-badge db-badge--uq">U</i>` : ""}
+          <span class="db-col__type">${esc(column.type)}</span>
+        </li>`;
+      })
+      .join("");
+    return `
+      <article class="db-card" data-table="${esc(table.name)}">
+        <div class="db-card__head">
+          <b>${esc(table.name)}</b>
+          <span class="db-card__rows" title="строк в таблице">${fmtNumber(table.count)}</span>
+        </div>
+        <p class="db-card__note">${esc(DB_NOTES[table.name] || "таблица базы")}</p>
+        <ul class="db-cols">${rows}</ul>
+      </article>`;
+  };
+
+  const drawDbLinks = (cardByTable) => {
+    const rels = [];
+    for (const table of state.database.tables) {
+      for (const fk of table.foreignKeys) {
+        rels.push({
+          from: table.name,
+          fromColumn: fk.column,
+          to: fk.table,
+          toColumn: fk.columnTo,
+          nullable: fk.onDelete === "SET NULL",
+        });
+      }
+    }
+    const pairTotal = new Map();
+    for (const rel of rels) {
+      const key = `${rel.from}→${rel.to}`;
+      pairTotal.set(key, (pairTotal.get(key) || 0) + 1);
+    }
+    const pairSeen = new Map();
+    const paths = [];
+    const n = (value) => value.toFixed(1);
+    for (const rel of rels) {
+      const fromCard = cardByTable.get(rel.from);
+      const toCard = cardByTable.get(rel.to);
+      if (!fromCard || !toCard) continue;
+      const key = `${rel.from}→${rel.to}`;
+      const index = pairSeen.get(key) || 0;
+      pairSeen.set(key, index + 1);
+      const shift = (index - (pairTotal.get(key) - 1) / 2) * 22;
+      const a = { x: fromCard.offsetLeft, y: fromCard.offsetTop, w: fromCard.offsetWidth, h: fromCard.offsetHeight };
+      const b = { x: toCard.offsetLeft, y: toCard.offsetTop, w: toCard.offsetWidth, h: toCard.offsetHeight };
+      const dx = b.x + b.w / 2 - (a.x + a.w / 2);
+      const dy = b.y + b.h / 2 - (a.y + a.h / 2);
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+      let p1;
+      let p2;
+      let c1;
+      let c2;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        p1 = { x: a.x + (dx > 0 ? a.w : 0), y: clamp(a.y + a.h / 2 + shift, a.y + 14, a.y + a.h - 14) };
+        p2 = { x: b.x + (dx > 0 ? 0 : b.w), y: clamp(b.y + b.h / 2 + shift, b.y + 14, b.y + b.h - 14) };
+        const bend = Math.max(36, Math.abs(p2.x - p1.x) * 0.4);
+        c1 = { x: p1.x + (dx > 0 ? bend : -bend), y: p1.y };
+        c2 = { x: p2.x + (dx > 0 ? -bend : bend), y: p2.y };
+      } else {
+        p1 = { x: clamp(a.x + a.w / 2 + shift, a.x + 14, a.x + a.w - 14), y: a.y + (dy > 0 ? a.h : 0) };
+        p2 = { x: clamp(b.x + b.w / 2 + shift, b.x + 14, b.x + b.w - 14), y: b.y + (dy > 0 ? 0 : b.h) };
+        const bend = Math.max(36, Math.abs(p2.y - p1.y) * 0.4);
+        c1 = { x: p1.x, y: p1.y + (dy > 0 ? bend : -bend) };
+        c2 = { x: p2.x, y: p2.y + (dy > 0 ? -bend : bend) };
+      }
+      paths.push(
+        `<path class="db-link${rel.nullable ? " is-nullable" : ""}" d="M${n(p1.x)} ${n(p1.y)} C${n(c1.x)} ${n(c1.y)} ${n(c2.x)} ${n(c2.y)} ${n(p2.x)} ${n(p2.y)}" marker-end="url(#db-arrow)"><title>${esc(`${rel.from}.${rel.fromColumn} → ${rel.to}.${rel.toColumn}`)}</title></path>`,
+      );
+    }
+    $("db-links").innerHTML = `
+      <defs>
+        <marker id="db-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L8 4 L0 8 Z" fill="rgba(242,237,228,.4)"></path>
+        </marker>
+      </defs>
+      ${paths.join("")}`;
+  };
+
+  const layoutDbMap = () => {
+    const map = $("db-map");
+    const cards = [...map.querySelectorAll(".db-card")];
+    if (!cards.length) return;
+    const layout = { ...DB_LAYOUT };
+    let extraRow = 0;
+    for (const card of cards) {
+      if (!layout[card.dataset.table]) layout[card.dataset.table] = [3, extraRow++];
+    }
+    const columns = Math.max(3, ...Object.values(layout).map(([col]) => col + 1));
+    const gapX = 26;
+    const gapY = 22;
+    const width = Math.max(map.parentElement.clientWidth, 780);
+    const colWidth = Math.floor((width - gapX * (columns - 1)) / columns);
+    for (const card of cards) card.style.width = `${colWidth}px`;
+    const ordered = [...cards].sort((a, b) => {
+      const [ca, ra] = layout[a.dataset.table];
+      const [cb, rb] = layout[b.dataset.table];
+      return ca - cb || ra - rb;
+    });
+    const tops = new Array(columns).fill(0);
+    for (const card of ordered) {
+      const [col] = layout[card.dataset.table];
+      card.style.left = `${col * (colWidth + gapX)}px`;
+      card.style.top = `${tops[col]}px`;
+      tops[col] += card.offsetHeight + gapY;
+    }
+    map.style.height = `${Math.max(0, ...tops) - gapY + 6}px`;
+    drawDbLinks(new Map(cards.map((card) => [card.dataset.table, card])));
+  };
+
+  const renderDatabase = () => {
+    const data = state.database;
+    if (!data) {
+      $("db-summary").textContent = "Собираю схему…";
+      return;
+    }
+    const totalRows = data.tables.reduce((sum, table) => sum + table.count, 0);
+    $("db-summary").textContent =
+      `${data.tables.length} ${wordForm(data.tables.length, ["таблица", "таблицы", "таблиц"])} · ` +
+      `${fmtNumber(totalRows)} ${wordForm(totalRows, ["запись", "записи", "записей"])} · ` +
+      `${fmtBytes(data.sizeBytes)} · схема v${data.userVersion} · ` +
+      `обновлено в ${new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+    const map = $("db-map");
+    map.querySelectorAll(".db-card").forEach((card) => card.remove());
+    map.insertAdjacentHTML("beforeend", data.tables.map(dbCard).join(""));
+    layoutDbMap();
+  };
+
+  const loadDatabase = async ({ refresh = false } = {}) => {
+    if (!refresh && state.database) {
+      renderDatabase();
+      return;
+    }
+    try {
+      state.database = await api("GET", "api/admin/database");
+      renderDatabase();
+    } catch (error) {
+      status("global-status", error.message, true);
+    }
+  };
+
+  let dbResizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (state.tab !== "database" || !state.database) return;
+    clearTimeout(dbResizeTimer);
+    dbResizeTimer = setTimeout(layoutDbMap, 150);
+  });
 
   /* ---------- helpers ---------- */
   // В Nano Banana шлём исходник ДО вырезания фона и строго JPEG:
