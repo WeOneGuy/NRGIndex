@@ -418,6 +418,47 @@ module.exports = (db, auth, config) => {
     });
   });
 
+  // Схема базы для админской карты: таблицы, колонки, ключи, счётчики и размер.
+  // Всё тянется из sqlite_master и pragma — новые миграции появляются на карте сами.
+  router.get("/database", requireAdmin, (req, res) => {
+    const TABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+      .all()
+      .filter((row) => TABLE_NAME.test(row.name))
+      .map((row) => {
+        const TABLE = row.name;
+        const count = db.prepare(`SELECT COUNT(*) AS n FROM "${TABLE}"`).get().n;
+        const columns = db
+          .prepare('SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?)')
+          .all(TABLE)
+          .map((column) => ({
+            name: column.name,
+            type: column.type || "ANY",
+            notNull: Boolean(column.notnull),
+            pk: Number(column.pk) > 0,
+            default: column.dflt_value ?? null,
+          }));
+        const unique = new Set();
+        for (const index of db.prepare('SELECT name, "unique" AS is_unique FROM pragma_index_list(?)').all(TABLE)) {
+          const parts = db.prepare("SELECT name FROM pragma_index_info(?)").all(index.name);
+          if (index.is_unique && parts.length === 1) unique.add(parts[0].name);
+        }
+        const foreignKeys = db
+          .prepare('SELECT "from" AS column_name, "table" AS ref_table, "to" AS ref_column, on_delete FROM pragma_foreign_key_list(?)')
+          .all(TABLE)
+          .map((fk) => ({ column: fk.column_name, table: fk.ref_table, columnTo: fk.ref_column, onDelete: fk.on_delete }));
+        return {
+          name: TABLE,
+          count,
+          columns: columns.map((column) => ({ ...column, unique: unique.has(column.name) })),
+          foreignKeys,
+        };
+      });
+    const sizeBytes = db.pragma("page_count", { simple: true }) * db.pragma("page_size", { simple: true });
+    res.json({ userVersion: db.pragma("user_version", { simple: true }), sizeBytes, tables });
+  });
+
   router.post("/audit/:id/undo", requireAdmin, (req, res) => {
     const id = int(req.params.id, "id", { min: 1 });
     const { notes } = history.undoEntry(db, id, { actor: req.user, auth });

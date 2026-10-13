@@ -187,6 +187,27 @@
     .audit-item__tag { display: inline-block; margin-top: 4px; font-size: 11.5px; opacity: .6; }
     .audit-item.is-undone .audit-item__summary { text-decoration: line-through; opacity: .55; }
     .audit-item .btn { padding: 5px 10px; font-size: 12px; white-space: nowrap; }
+    .db-map-scroll { overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+    .db-map { position: relative; min-width: 780px; height: 420px; }
+    .db-map__links { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+    .db-link { fill: none; stroke: rgba(242,237,228,.28); stroke-width: 1.5; }
+    .db-link.is-nullable { stroke-dasharray: 5 6; }
+    .db-card { position: absolute; padding: 10px 12px 12px; border: 1px solid rgba(255,255,255,.13); border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)), #14110f; box-shadow: 0 12px 30px rgba(0,0,0,.35); }
+    .db-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .db-card__head b { font: 600 13.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .db-card__rows { color: var(--accent, #ff4f79); font-size: 11px; white-space: nowrap; }
+    .db-card__note { margin: 3px 0 8px; font-size: 11px; opacity: .5; }
+    .db-cols { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+    .db-cols li { display: flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 1.5; }
+    .db-cols code { font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(255,255,255,.85); }
+    .db-col__type { margin-left: auto; font-size: 9.5px; letter-spacing: .04em; opacity: .38; text-transform: uppercase; }
+    .db-badge { flex: none; padding: 1px 5px; border-radius: 999px; font-size: 9px; font-weight: 700; letter-spacing: .06em; border: 1px solid transparent; font-style: normal; }
+    .db-badge--pk { background: #ff4f79; color: #100e0d; }
+    .db-badge--fk { background: rgba(255,116,72,.16); color: #ffa585; border-color: rgba(255,116,72,.45); }
+    .db-badge--uq { background: rgba(239,238,135,.14); color: #efee87; border-color: rgba(239,238,135,.4); }
+    .db-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: 0 0 8px; font-size: 12px; opacity: .75; }
+    .db-line { display: inline-block; width: 26px; border-top: 2px solid rgba(242,237,228,.4); margin-right: 6px; vertical-align: middle; }
+    .db-line--null { border-top-style: dashed; }
     @media (max-width: 720px) {
       .audit-item { grid-template-columns: 26px minmax(0, 1fr); }
       .audit-item__time { grid-column: 2; order: -1; padding: 0; }
@@ -237,6 +258,7 @@
       <button class="btn" type="button" data-tab="stats" data-admin-only>Статистика</button>
       <button class="btn" type="button" data-tab="audit" data-admin-only>Журнал</button>
       <button class="btn" type="button" data-tab="logs" data-admin-only>Логи</button>
+      <button class="btn" type="button" data-tab="database" data-admin-only>База данных</button>
     </nav>
 
     <section id="tab-drinks" hidden>
@@ -482,6 +504,23 @@
       </div>
       <p class="admin-hint">Запросы к ИИ и распознаванию речи: модель, токены, цена и время. Ошибки — серверные (5xx), в том числе сбои ИИ. Журнал действий — на вкладке «Журнал».</p>
       <div id="logs-table"></div>
+    </section>
+
+    <section id="tab-database" hidden>
+      <p class="admin-hint" id="db-summary">Собираю схему…</p>
+      <div class="db-map-scroll">
+        <div class="db-map" id="db-map">
+          <svg class="db-map__links" id="db-links" aria-hidden="true" focusable="false"></svg>
+        </div>
+      </div>
+      <div class="db-legend">
+        <span><i class="db-badge db-badge--pk">PK</i> первичный ключ</span>
+        <span><i class="db-badge db-badge--fk">FK</i> внешний ключ</span>
+        <span><i class="db-badge db-badge--uq">U</i> уникальное поле</span>
+        <span><i class="db-line"></i>обязательная связь</span>
+        <span><i class="db-line db-line--null"></i>связь с обнулением (SET NULL)</span>
+      </div>
+      <p class="admin-hint">Карта строится из самой базы: новые таблицы и колонки появятся после миграций сами, счётчики — живые. Наведи на связь, чтобы увидеть её поля.</p>
     </section>
   </main>
 

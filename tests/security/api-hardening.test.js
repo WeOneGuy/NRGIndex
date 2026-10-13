@@ -46,6 +46,7 @@ test("security: матрица доступа для API и админ-стра�
   const cases = [
     ["GET", "/api/admin/data", null, 401],
     ["GET", "/api/admin/data", userCookie, 403],
+    ["GET", "/api/admin/database", userCookie, 403],
     ["GET", "/api/cabinet/me", null, 401],
     ["POST", "/api/uploads", null, 401],
     ["POST", "/api/admin/drinks", userCookie, 403],
