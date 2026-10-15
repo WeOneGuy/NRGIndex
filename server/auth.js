@@ -49,6 +49,9 @@ function createAuth(db, config) {
   // Куку переставляем при возврате пользователя: не чаще раза в сутки и не позже
   // четверти TTL — так активная сессия не умирает от Max-Age куки.
   const cookieRefreshMs = Math.min(24 * 60 * 60 * 1000, ttlMs / 4);
+  // Запись last_seen_at — тоже не на каждый запрос: активность и так продлевают
+  // при каждом заходе, а окно простоя измеряется днями. Раз в 5 минут достаточно.
+  const touchIntervalMs = 5 * 60 * 1000;
 
   // 'YYYY-MM-DD HH:MM:SS' из SQLite (UTC) → timestamp
   const parseDbDate = (value) => Date.parse(String(value || "").replace(" ", "T") + "Z") || 0;
@@ -113,7 +116,9 @@ function createAuth(db, config) {
     const row = stmt.findSession.get(tokenHash, `-${idleDays} days`);
     if (!row || !row.is_active) return null;
     const seenAt = parseDbDate(row.last_seen_at);
-    stmt.touchSession.run(`+${config.sessionTtlDays} days`, tokenHash);
+    if (Date.now() - seenAt > touchIntervalMs) {
+      stmt.touchSession.run(`+${config.sessionTtlDays} days`, tokenHash);
+    }
     // Скользящая сессия: активность продлевает и БД-запись, и куку в браузере.
     // Без перестановки куки браузер выкинул бы её через TTL после входа.
     if (res && Date.now() - seenAt > cookieRefreshMs) {

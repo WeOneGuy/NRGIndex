@@ -543,20 +543,21 @@
 
   (async () => {
     // Роль нужна только чтобы показать сотрудникам кнопку правки банки в админке.
-    try {
-      const meRes = await fetch("api/auth/me", { headers: { accept: "application/json" } });
-      currentUser = (await meRes.json()).user || null;
-    } catch {
-      currentUser = null;
-    }
-    try {
-      const res = await fetch("api/public/summary", { headers: { accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      data = await res.json();
-    } catch (error) {
-      board.innerHTML = `<div class="empty-tier">Не удалось загрузить данные: ${esc(error.message)}</div>`;
+    // Оба запроса летят параллельно: ожидание роли не задерживает тирлист.
+    const [meResult, summaryResult] = await Promise.allSettled([
+      fetch("api/auth/me", { headers: { accept: "application/json" } }).then((res) => res.json()),
+      fetch("api/public/summary", { headers: { accept: "application/json" } }).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      }),
+    ]);
+    currentUser = meResult.status === "fulfilled" ? meResult.value?.user || null : null;
+    if (summaryResult.status === "rejected") {
+      const reason = summaryResult.reason;
+      board.innerHTML = `<div class="empty-tier">Не удалось загрузить данные: ${esc(reason?.message || reason)}</div>`;
       return;
     }
+    data = summaryResult.value;
     if (data.site?.title) document.title = `${data.site.title} — тирлист энергетиков`;
     const brandName = document.querySelector(".brand__name");
     if (brandName && data.site?.title && data.site.title !== "NRG / INDEX") {

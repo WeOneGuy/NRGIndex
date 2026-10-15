@@ -174,10 +174,31 @@ function migrate(db) {
 function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
+  // WAL и NORMAL: коммит не ждёт fsync на каждый запрос — запись заметно быстрее.
+  // Устойчивость та же для сбоя процесса, при отключении питания теряется только
+  // последняя незакоммиченная транзакция, а не база.
   db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
+  // Сортировки и агрегаты — в памяти, страницы — в кэше, чтение — через mmap.
+  db.pragma("temp_store = MEMORY");
+  db.pragma("cache_size = -8000");
+  db.pragma("mmap_size = 67108864");
   migrate(db);
+  // Прозрачный кэш стейтментов: SQL у нас статический и повторяется на каждый
+  // запрос десятками, а db.prepare() каждый раз компилирует его заново.
+  // Ключ — сам SQL, динамические запросы тоже кэшируются по итоговой строке.
+  const compile = db.prepare.bind(db);
+  const prepared = new Map();
+  db.prepare = (sql) => {
+    let statement = prepared.get(sql);
+    if (!statement) {
+      statement = compile(sql);
+      prepared.set(sql, statement);
+    }
+    return statement;
+  };
   return db;
 }
 
