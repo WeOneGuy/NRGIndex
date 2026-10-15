@@ -424,6 +424,13 @@
   };
 
   (async () => {
+    // Профиль участника и список участников друг от друга не зависят: когда ник
+    // известен из адреса, оба запроса летят параллельно, а не друг за другом.
+    const profileRequest = username
+      ? getJson(`/api/public/profile/${encodeURIComponent(username)}`)
+          .then((value) => ({ value }))
+          .catch((error) => ({ error }))
+      : null;
     let summary = null;
     try {
       summary = await getJson("/api/public/summary");
@@ -446,7 +453,9 @@
     }
     if (!username) history.replaceState(null, "", `/profile.html?u=${encodeURIComponent(target)}`);
     try {
-      const data = await getJson(`/api/public/profile/${encodeURIComponent(target)}`);
+      const result = (await profileRequest) || (await getJson(`/api/public/profile/${encodeURIComponent(target)}`).then((value) => ({ value })).catch((error) => ({ error })));
+      if (result.error) throw result.error;
+      const data = result.value;
       const title = summary?.site?.title || "NRG / INDEX";
       document.title = `${data.profile.name} — ${title}`;
       renderHero(data);
