@@ -41,8 +41,11 @@
   const specimenNumber = (data, drink) =>
     String(data.drinks.findIndex((item) => item.id === drink.id) + 1).padStart(3, "0");
 
-  function html({ drink, data, currentUser = null }) {
+  function html({ drink, data, currentUser = null, sharedReview = "" }) {
     if (!drink || !data) return "";
+    const sharedPerson = sharedReview ? data.participants.find((person) => person.id === sharedReview) : null;
+    const sharedRating = sharedPerson ? drink.ratings?.[sharedPerson.id] : null;
+    const pinned = sharedPerson && sharedRating?.review?.trim() ? { person: sharedPerson, rating: sharedRating } : null;
     const average = averageFor(data, drink);
     const votes = scoredRatings(data, drink).length;
     const scoreCopy = average
@@ -69,10 +72,13 @@
     `
       : "";
 
-    const reviewRow = (person, rating) => {
+    const shareIcon = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"/></svg>`;
+    const shareReviewButton = (person) => `<button class="review-share" type="button" data-share-review="${esc(person.id)}" aria-label="Скопировать ссылку на отзыв ${esc(person.name)}" title="Поделиться отзывом">${shareIcon}</button>`;
+
+    const reviewRow = (person, rating, { pinned: isPinned = false } = {}) => {
       const hasReview = Boolean(rating?.review?.trim());
       return `
-        <article class="review-row${rating ? "" : " is-untried"}">
+        <article class="review-row${rating ? "" : " is-untried"}${isPinned ? " review-row--pinned" : ""}">
           <a class="reviewer" href="profile.html?u=${encodeURIComponent(person.id)}" style="--person-color:${safeColor(person.color, "#9fb7ff")}" aria-label="Открыть профиль ${esc(person.name)}">
             <span class="reviewer__avatar">${person.avatar ? `<img src="${esc(person.avatar)}" alt="">` : esc(person.initials)}</span>
             <span><b>${esc(person.name)}</b><small>${esc(person.role)}</small><i class="reviewer__hint">профиль →</i></span>
@@ -81,6 +87,7 @@
           <p class="review-text">${hasReview ? `«${esc(rating.review)}»` : rating ? "Подробное мнение пока не записано." : "Ещё не пробовал или не выставил оценку."}</p>
           <span class="review-links">
             <button class="review-link" type="button" data-person-view="${esc(person.id)}">тирлист →</button>
+            ${hasReview ? shareReviewButton(person) : ""}
           </span>
         </article>
       `;
@@ -89,16 +96,19 @@
     const rated = [];
     const untried = [];
     for (const person of data.participants) {
+      if (pinned && person.id === pinned.person.id) continue;
       const rating = drink.ratings?.[person.id];
       (rating ? rated : untried).push({ person, rating });
     }
-    const reviews = [
-      ...rated.map(({ person, rating }) => reviewRow(person, rating)),
-      rated.length && untried.length
-        ? `<p class="reviews__subhead">Ещё не пробовали · ${untried.length}</p>`
-        : "",
-      ...untried.map(({ person, rating }) => reviewRow(person, rating)),
-    ].join("");
+    const reviews = rated.length + untried.length
+      ? [
+          ...rated.map(({ person, rating }) => reviewRow(person, rating)),
+          rated.length && untried.length
+            ? `<p class="reviews__subhead">Ещё не пробовали · ${untried.length}</p>`
+            : "",
+          ...untried.map(({ person, rating }) => reviewRow(person, rating)),
+        ].join("")
+      : `<p class="hint">Других отзывов пока нет.</p>`;
 
     // Оценка живёт в кабинете: там полноценный редактор мнения с ИИ-разбором.
     // Кнопка просто уводит в него сразу на нужную банку (?rate=<slug>).
@@ -129,6 +139,7 @@
         </div>
       </section>
       ${rateButton}
+      ${pinned ? `<section class="shared-review" aria-label="Отзыв, которым поделились"><p class="shared-review__label">Отзыв, которым поделились</p>${reviewRow(pinned.person, pinned.rating, { pinned: true })}</section>` : ""}
       <section class="reviews">
         <div class="reviews__head"><h4>Что сказали</h4><span>${data.participants.length} ${participantWord(data.participants.length)} · личные вердикты</span></div>
         ${reviews}

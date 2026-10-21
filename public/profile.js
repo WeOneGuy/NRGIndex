@@ -290,6 +290,25 @@
         button.textContent = "не вышло — ссылка в адресной строке";
       }
     });
+    content.querySelectorAll("[data-share-review]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const url = `${location.origin}/d/${encodeURIComponent(drink.id)}?review=${encodeURIComponent(button.dataset.shareReview)}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          button.classList.add("is-copied");
+          button.title = "Ссылка скопирована";
+          window.setTimeout(() => {
+            button.classList.remove("is-copied");
+            button.title = "Поделиться отзывом";
+          }, 1500);
+        } catch {
+          button.title = "Не удалось скопировать ссылку";
+          window.setTimeout(() => {
+            button.title = "Поделиться отзывом";
+          }, 2000);
+        }
+      });
+    });
     if (!dialog.open) dialog.showModal();
     document.body.classList.add("is-dialog-open");
   };

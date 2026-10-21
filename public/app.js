@@ -375,12 +375,12 @@
     }
   };
 
-  const openDrink = (drinkId, { returnTo = "" } = {}) => {
+  const openDrink = (drinkId, { returnTo = "", sharedReview = "" } = {}) => {
     const drink = getDrink(drinkId);
     if (!drink) return;
     if (returnTo) returnToProfile = returnTo;
     // Шаблон общий с профилем (public/drink-dialog.js) — карточка везде одинаковая.
-    dialogContent.innerHTML = window.NrgDrinkDialog.html({ drink, data, currentUser });
+    dialogContent.innerHTML = window.NrgDrinkDialog.html({ drink, data, currentUser, sharedReview });
 
     dialogContent.querySelectorAll("[data-related-drink]").forEach((button) => {
       button.addEventListener("click", () => openDrink(button.dataset.relatedDrink));
@@ -410,12 +410,33 @@
       }
     });
 
+    dialogContent.querySelectorAll("[data-share-review]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const url = `${location.origin}/d/${encodeURIComponent(drink.id)}?review=${encodeURIComponent(button.dataset.shareReview)}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          button.classList.add("is-copied");
+          button.title = "Ссылка скопирована";
+          window.setTimeout(() => {
+            button.classList.remove("is-copied");
+            button.title = "Поделиться отзывом";
+          }, 1500);
+        } catch {
+          button.title = "Не удалось скопировать ссылку";
+          window.setTimeout(() => {
+            button.title = "Поделиться отзывом";
+          }, 2000);
+        }
+      });
+    });
+
     // Повторное showModal() на открытом диалоге бросает InvalidStateError —
     // переход по «похожей» банке просто перерисовывает содержимое.
     if (!dialog.open) dialog.showModal();
     document.body.classList.add("is-dialog-open");
     // диплинк: открытая карточка живёт на /d/<slug> — можно кидать в чат
-    history.replaceState(null, "", `/d/${encodeURIComponent(drink.id)}`);
+    const reviewQuery = sharedReview ? `?review=${encodeURIComponent(sharedReview)}` : "";
+    history.replaceState(null, "", `/d/${encodeURIComponent(drink.id)}${reviewQuery}`);
   };
 
   const closeDialog = () => {
@@ -654,6 +675,7 @@
     setupRoulette();
     const pathDrink = location.pathname.match(/^\/d\/([^/]+?)\/?$/)?.[1];
     const drinkParam = (pathDrink ? decodeURIComponent(pathDrink) : params.get("drink")) || "";
+    const reviewParam = params.get("review") || "";
     if (drinkParam && getDrink(drinkParam)) {
       history.replaceState(null, "", location.pathname + location.hash);
       // Из профиля карточки приходят с ?from=profile&u=<ник>: запоминаем, куда вернуть.
@@ -663,7 +685,7 @@
             ? `/profile.html?u=${encodeURIComponent(params.get("u"))}`
             : "/profile.html"
           : "";
-      openDrink(drinkParam, { returnTo: fromProfile });
+      openDrink(drinkParam, { returnTo: fromProfile, sharedReview: reviewParam });
     }
   })();
 })();

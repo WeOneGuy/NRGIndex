@@ -436,9 +436,42 @@
 
   /* ---------- my ratings ---------- */
   const savingRatings = new Set();
+  const REVIEW_AUTOSAVE_MS = 3000;
+  const reviewTimers = new Map();
+
+  const saveMineReview = async (slug) => {
+    const item = state.mine.find((rating) => rating.drink === slug);
+    if (!item) return;
+    const review = String(item.review ?? "").slice(0, 1000);
+    try {
+      await api("PUT", `api/cabinet/ratings/${encodeURIComponent(slug)}`, {
+        tier: item.tier || "B",
+        review,
+      });
+      // Пока шёл запрос, могли напечатать ещё: не показываем «сохранено»,
+      // если текст уже другой, и не затираем его старым значением.
+      if (item.review === review) toast("Изменения сохранены");
+    } catch (error) {
+      toastError(error.message);
+    }
+  };
+
+  const scheduleMineReviewSave = (slug) => {
+    window.clearTimeout(reviewTimers.get(slug));
+    reviewTimers.set(
+      slug,
+      window.setTimeout(() => {
+        reviewTimers.delete(slug);
+        void saveMineReview(slug);
+      }, REVIEW_AUTOSAVE_MS),
+    );
+  };
+
   const saveRating = async (slug, tier, review) => {
     if (savingRatings.has(slug)) return;
     savingRatings.add(slug);
+    window.clearTimeout(reviewTimers.get(slug));
+    reviewTimers.delete(slug);
     const current = state.mine.find((item) => item.drink === slug) || {};
     try {
       await api("PUT", `api/cabinet/ratings/${encodeURIComponent(slug)}`, {
@@ -509,7 +542,18 @@
     container.querySelectorAll(".mine-row").forEach((row) => {
       const slug = row.dataset.drink;
       row.querySelector("[data-m-tier]").onchange = (e) => saveRating(slug, e.target.value, null);
-      row.querySelector("[data-m-review]").onchange = (e) => saveRating(slug, null, e.target.value);
+      const reviewInput = row.querySelector("[data-m-review]");
+      reviewInput.addEventListener("input", () => {
+        const item = state.mine.find((rating) => rating.drink === slug);
+        if (item) item.review = reviewInput.value;
+        scheduleMineReviewSave(slug);
+      });
+      reviewInput.addEventListener("change", () => {
+        if (!reviewTimers.has(slug)) return;
+        window.clearTimeout(reviewTimers.get(slug));
+        reviewTimers.delete(slug);
+        void saveMineReview(slug);
+      });
       const rating = state.mine.find((item) => item.drink === slug) || {};
       const drink = state.summary.drinks.find((item) => item.id === slug) || { name: rating.name };
       row.querySelector("[data-m-edit]").onclick = () => openOpinion(slug);

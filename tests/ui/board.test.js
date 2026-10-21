@@ -39,7 +39,7 @@ test("доска: карточка не крутится за курсором �
 
 test("диплинк: /d/:slug открывает карточку, закрытие чистит URL", () => {
   assert.match(appSource, /location\.pathname\.match\(\/\^\\\/d\\\//);
-  assert.match(appSource, /history\.replaceState\(null, "", `\/d\/\$\{encodeURIComponent\(drink\.id\)\}`\)/);
+  assert.match(appSource, /history\.replaceState\(null, "", `\/d\/\$\{encodeURIComponent\(drink\.id\)\}\$\{reviewQuery\}`\)/);
   assert.match(appSource, /if \(!location\.pathname\.startsWith\("\/d\/"\)\) return;/);
   assert.match(appSource, /history\.replaceState\(null, "", "\/"\)/);
 });

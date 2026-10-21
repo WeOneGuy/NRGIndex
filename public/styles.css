@@ -310,6 +310,16 @@ html.can-ready .cursor-aura { opacity: 1; }
 .review-text { margin: 0; color: var(--muted); font: 500 italic 1.05rem/1.45 var(--serif); }
 .review-link { border: 0; border-bottom: 1px solid var(--line); padding: .3rem 0; color: var(--muted); background: none; cursor: pointer; font-size: .48rem; letter-spacing: .12em; text-transform: uppercase; transition: color .2s, border-color .2s; }
 .review-link:hover { color: var(--paper); border-color: var(--paper); }
+.review-links { display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; align-self: stretch; gap: .55rem; }
+.review-share { display: grid; place-items: center; width: 1.9rem; height: 1.9rem; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; transition: color .25s, border-color .25s, background .25s, transform .25s var(--ease); }
+.review-share svg { width: .95rem; height: .95rem; }
+.review-share:hover { color: var(--paper); border-color: var(--paper); }
+.review-share.is-copied { background: var(--acid); color: var(--ink); border-color: var(--acid); }
+.review-share.is-copied svg { display: none; }
+.review-share.is-copied::after { content: "✓"; font: 700 1rem/1 var(--sans); }
+.shared-review { margin: 1.4rem 3.5rem 0; padding: 1rem 1.2rem .2rem; border: 1px solid color-mix(in srgb, var(--acid) 35%, var(--line)); border-radius: .9rem; background: color-mix(in srgb, var(--acid) 7%, transparent); }
+.shared-review__label { margin: 0; color: var(--acid); font-size: .5rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.shared-review .review-row { border-top: 0; min-height: auto; padding: .8rem 0 1rem; }
 
 /* оценка из карточки на тирлисте: уводит в кабинет к полноценному редактору мнения */
 .dialog-rate { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem 1rem; padding: 1.4rem 3.5rem 0; }
@@ -413,7 +423,9 @@ html.can-ready .cursor-aura { opacity: 1; }
   .reviews__head { align-items: flex-start; flex-direction: column; gap: .35rem; }
   .review-row { grid-template-columns: minmax(0,1fr) 2.5rem; gap: .8rem; }
   .review-text { grid-column: 1 / -1; }
+  .review-links,
   .review-link { grid-column: 1 / -1; }
+  .shared-review { margin: 1.2rem 1.25rem 0; }
   .related-drinks { padding: 0 1.25rem 2rem; }
   .related-drinks__grid { grid-template-columns: 1fr; }
   .related-card { grid-template-columns: 7rem minmax(0, 1fr); }
@@ -634,7 +646,6 @@ a.brand:hover .brand__name { color: var(--orange); }
 /* --- ссылки на профили --- */
 .header-people { color: inherit; text-decoration: none; transition: color .2s; }
 .header-people:hover { color: var(--paper); }
-.review-links { display: flex; flex-direction: column; align-items: flex-start; gap: .35rem; }
 a.review-link { text-decoration: none; }
 #view-description .header-cab { white-space: nowrap; }
 
