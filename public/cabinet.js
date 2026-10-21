@@ -16,6 +16,25 @@
     return forms[2];
   };
 
+  /* ---------- подтверждения сохранений ---------- */
+  // Тост в углу экрана: после правки видно, что именно ушло на сервер.
+  const toast = (message) => window.nrgToast?.(message);
+  const toastError = (message) => window.nrgToast?.error?.(message);
+  const listWords = (parts) => {
+    const list = parts.slice();
+    const last = list.pop();
+    return `${list.join(", ")}${list.length ? " и " : ""}${last}`;
+  };
+  // «Отзыв сохранён», «Оценка и отзыв сохранены», «Оценка, отзыв и фото сохранены».
+  const savedMessage = (parts) => {
+    if (!parts.length) return "Всё сохранено";
+    if (parts.length === 1) {
+      return { оценка: "Оценка сохранена", отзыв: "Отзыв сохранён", фото: "Фото сохранено" }[parts[0]];
+    }
+    const text = listWords(parts);
+    return `${text.charAt(0).toUpperCase()}${text.slice(1)} сохранены`;
+  };
+
   // Текстареа растёт/ужимается под текст: без внутреннего скролла и пустого места.
   // Обнуляем высоту перед замером — иначе scrollHeight упирается в текущую высоту.
   const autoGrow = (node, max = 420) => {
@@ -296,6 +315,7 @@
       await saveAvatar({ imageDataUrl: canvas.toDataURL("image/jpeg", 0.9) });
       $("avatar-status").textContent = "аватар обновлён ✓";
       closeAvatarDialog();
+      toast("Аватар сохранён");
     } catch (error) {
       setAvatarCropStatus(error.message, true);
     }
@@ -307,6 +327,7 @@
       $("avatar-status").textContent = "аватар убран";
       setAvatarCropStatus("аватар убран");
       if ($("avatar-dialog").open) closeAvatarDialog();
+      toast("Аватар убран");
     } catch (error) {
       $("avatar-status").textContent = error.message;
       setAvatarCropStatus(error.message, true);
@@ -383,6 +404,7 @@
       $("new-pass2").value = "";
       $("pass-status").textContent = "";
       await enterCabinet();
+      toast("Пароль установлен");
     } catch (error) {
       $("pass-status").textContent = error.message;
     }
@@ -397,6 +419,7 @@
       $("old-pass").value = "";
       $("change-pass").value = "";
       $("sync-status").textContent = "Пароль обновлён ✓";
+      toast("Пароль изменён");
     } catch (error) {
       $("sync-status").textContent = error.message;
     }
@@ -423,8 +446,13 @@
         review: review !== null && review !== undefined ? review : current.review || "",
       });
       await refreshAll();
+      if (review !== null && review !== undefined) {
+        toast(String(review).trim() ? "Отзыв сохранён" : "Отзыв убран");
+      } else {
+        toast(`Тир обновлён: ${tier}`);
+      }
     } catch (error) {
-      alert(error.message);
+      toastError(error.message);
     } finally {
       savingRatings.delete(slug);
     }
@@ -499,8 +527,9 @@
         try {
           await api("DELETE", `api/cabinet/ratings/${encodeURIComponent(slug)}`);
           await refreshAll();
+          toast("Оценка удалена");
         } catch (error) {
-          alert(error.message);
+          toastError(error.message);
         }
       };
       row.querySelector("[data-m-del-drink]")?.addEventListener("click", async () => {
@@ -515,8 +544,9 @@
         try {
           await api("DELETE", `api/cabinet/drinks/${encodeURIComponent(slug)}`);
           await refreshAll();
+          toast("Банка удалена из индекса");
         } catch (error) {
-          alert(error.message);
+          toastError(error.message);
         }
       });
     });
@@ -527,7 +557,18 @@
   /* ---------- редактор своего мнения ---------- */
   // Своё мнение целиком: тир и отзыв плюс полное управление фото банки
   // (заменить своим файлом, найти в интернете, убрать). Всё с историей правок.
-  const opinion = { slug: "", image: null, remove: false, original: null, originalUrl: null, drink: null, fromSmart: false };
+  const opinion = {
+    slug: "",
+    image: null,
+    remove: false,
+    original: null,
+    originalUrl: null,
+    drink: null,
+    fromSmart: false,
+    // Что было при открытии: по разнице понимаем, что именно сохранили.
+    initialTier: "",
+    initialReview: "",
+  };
 
   const setOpStatus = (text, isError = false) => {
     $("op-status").textContent = text;
@@ -582,6 +623,10 @@
       .map((tier) => `<option ${tier.id === currentTier ? "selected" : ""}>${esc(tier.id)}</option>`)
       .join("");
     $("op-review").value = options.review !== undefined ? options.review : mine?.review || "";
+    // База для «что изменилось» — сохранённое, а не предзаполнение: и клик по тиру,
+    // и разбор ИИ ещё не ушли на сервер.
+    opinion.initialTier = mine?.tier || "";
+    opinion.initialReview = mine?.review || "";
     $("op-ai-text").value = options.aiText || "";
     $("op-photo-file").value = "";
     $("op-photo-query").value = [drink.name, drink.flavor].filter(Boolean).join(" ");
@@ -771,7 +816,14 @@
       } else if (opinion.remove) {
         await api("PUT", `api/cabinet/drinks/${encodeURIComponent(slug)}/photo`, { removeImage: true });
       }
+      // Сообщение собираем по фактической разнице: «Отзыв сохранён» появляется
+      // именно тогда, когда человек дописал текст, а не на любой клик «Сохранить».
+      const changed = [];
+      if ($("op-tier").value !== opinion.initialTier) changed.push("оценка");
+      if ($("op-review").value !== opinion.initialReview) changed.push("отзыв");
+      if (opinion.image || opinion.remove) changed.push("фото");
       closeOpinion();
+      toast(savedMessage(changed));
       if (opinion.fromSmart) {
         resetSmart();
         $("smart-status").textContent = "Оценка сохранена ✓";
@@ -1702,6 +1754,7 @@
     // Форма и камера остаются на месте, сбрасывается только подтверждение:
     // следующая новая банка снова потребует проверки.
     $("smart-status").textContent = "В индексе ✓";
+    toast("Банка добавлена в индекс");
     await refreshAll();
   };
 

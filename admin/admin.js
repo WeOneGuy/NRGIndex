@@ -60,11 +60,14 @@
       reader.readAsDataURL(blob);
     });
   };
-  const status = (id, message, isError = false) => {
+  const status = (id, message, isError = false, notify = false) => {
     const node = $(id);
     if (!node) return;
     node.textContent = message;
     node.style.color = isError ? "#ff8a8a" : "";
+    // Подтверждение дублируем тостом: форма бывает прокручена, и статус у кнопки
+    // легко не заметить. Ошибки остаются только на месте — они не исчезают сами.
+    if (notify && !isError) window.nrgToast?.(message.replace(/\s*✓\s*$/, ""));
   };
 
   const loadData = async () => {
@@ -164,6 +167,7 @@
         try {
           await api("PATCH", `api/admin/drinks/${drink.id}`, { published: !drink.published });
           await refresh();
+          window.nrgToast?.(drink.published ? "Напиток скрыт с сайта" : "Напиток опубликован");
         } catch (error) {
           status("global-status", error.message, true);
         }
@@ -175,7 +179,7 @@
           status("global-status", "Обрабатываю картинку…");
           await api("POST", `api/admin/drinks/${button.dataset.reprocess}/reprocess-image`, {});
           await refresh();
-          status("global-status", "Картинка переобработана, цвет обновлён ✓");
+          status("global-status", "Картинка переобработана, цвет обновлён ✓", false, true);
         } catch (error) {
           status("global-status", error.message, true);
         }
@@ -198,7 +202,7 @@
         try {
           await api("DELETE", `api/admin/drinks/${drink.id}`);
           await refresh();
-          status("global-status", `«${drink.name}» удалён`);
+          status("global-status", `«${drink.name}» удалён`, false, true);
         } catch (error) {
           status("global-status", error.message, true);
         }
@@ -344,7 +348,7 @@
       mergeDialog.close();
       await refresh();
       const moved = result.movedRatings ? `, перенесено оценок: ${result.movedRatings}` : "";
-      status("global-status", `«${source.name}» объединён с «${target.name}»${moved}`);
+      status("global-status", `«${source.name}» объединён с «${target.name}»${moved}`, false, true);
     } catch (error) {
       status("global-status", error.message, true);
     }
@@ -701,7 +705,7 @@
       $("drink-form").hidden = true;
       $("drink-form").reset();
       await refresh();
-      status("global-status", "Напиток сохранён ✓");
+      status("global-status", "Напиток сохранён ✓", false, true);
     } catch (error) {
       status("drink-status", error.message, true);
     } finally {
@@ -752,6 +756,7 @@
         try {
           await api("DELETE", `api/admin/tiers/${encodeURIComponent(button.dataset.delete)}`);
           await refresh();
+          window.nrgToast?.(`Тир ${button.dataset.delete} удалён`);
         } catch (error) {
           status("global-status", error.message, true);
         }
@@ -796,7 +801,7 @@
       $("tier-form").hidden = true;
       $("tier-form").reset();
       await refresh();
-      status("global-status", "Тир сохранён ✓");
+      status("global-status", "Тир сохранён ✓", false, true);
     } catch (error) {
       status("tier-status", error.message, true);
     }
@@ -852,6 +857,7 @@
           const { tempPassword } = await api("POST", `api/admin/users/${user.id}/password`, {});
           $("global-status").innerHTML = `Временный пароль для <b>${esc(user.username)}</b>: <span class="admin-temp">${esc(tempPassword)}</span> — передайте и попросите сменить.`;
           await refresh();
+          window.nrgToast?.(`Пароль @${user.username} сброшен`);
         } catch (error) {
           status("global-status", error.message, true);
         }
@@ -874,6 +880,7 @@
         try {
           await api("DELETE", `api/admin/users/${user.id}`);
           await refresh();
+          window.nrgToast?.(`Пользователь ${user.username} удалён`);
         } catch (error) {
           status("global-status", error.message, true);
         }
@@ -946,7 +953,7 @@
         await api("PATCH", `api/admin/users/${id}`, payload);
         $("user-form").hidden = true;
         await refresh();
-        status("global-status", "Пользователь обновлён ✓");
+        status("global-status", "Пользователь обновлён ✓", false, true);
       } else {
         const payload = {
           username: $("u-username").value,
@@ -964,7 +971,7 @@
         if (tempPassword) {
           $("global-status").innerHTML = `Создан <b>${esc(user.username)}</b>. Временный пароль: <span class="admin-temp">${esc(tempPassword)}</span> — передайте и попросите сменить.`;
         } else {
-          status("global-status", "Пользователь создан ✓");
+          status("global-status", "Пользователь создан ✓", false, true);
         }
       }
     } catch (error) {
@@ -1061,7 +1068,7 @@
     try {
       await api("PUT", "api/admin/settings", payload);
       await refresh();
-      status("settings-status", "Настройки сохранены ✓");
+      status("settings-status", "Настройки сохранены ✓", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1078,7 +1085,7 @@
     try {
       await api("PUT", "api/admin/settings", { openrouterKey: "" });
       await refresh();
-      status("settings-status", "Ключ убран");
+      status("settings-status", "Ключ убран", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1094,7 +1101,7 @@
     try {
       await api("PUT", "api/admin/settings", { textApiKey: "" });
       await refresh();
-      status("settings-status", "Ключ разбора убран");
+      status("settings-status", "Ключ разбора убран", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1125,7 +1132,7 @@
     try {
       await api("PUT", "api/admin/settings", { googleCseKey: "" });
       await refresh();
-      status("settings-status", "Ключ Google убран");
+      status("settings-status", "Ключ Google убран", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1156,7 +1163,7 @@
     try {
       await api("PUT", "api/admin/settings", { geminiKey: "" });
       await refresh();
-      status("settings-status", "Ключ Gemini убран");
+      status("settings-status", "Ключ Gemini убран", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1173,7 +1180,7 @@
     try {
       await api("PUT", "api/admin/settings", { openrouterImagePrompt: "", geminiImagePrompt: "" });
       await refresh();
-      status("settings-status", "Промпты сброшены к стандартным");
+      status("settings-status", "Промпты сброшены к стандартным", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1187,7 +1194,7 @@
       const dataUrl = await fileToOriginalDataUrl(file);
       await api("POST", "api/admin/settings/image-template", { dataUrl });
       await refresh();
-      status("settings-status", "Фото-шаблон обновлён ✓");
+      status("settings-status", "Фото-шаблон обновлён ✓", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     } finally {
@@ -1205,7 +1212,7 @@
     try {
       await api("DELETE", "api/admin/settings/image-template");
       await refresh();
-      status("settings-status", "Фото-шаблон сброшен");
+      status("settings-status", "Фото-шаблон сброшен", false, true);
     } catch (error) {
       status("settings-status", error.message, true);
     }
@@ -1360,7 +1367,7 @@
         try {
           const { notes } = await api("POST", `api/admin/audit/${row.id}/undo`, {});
           await refresh();
-          status("global-status", `Откачено ✓${notes?.length ? ` (${notes.join("; ")})` : ""}`);
+          status("global-status", `Откачено ✓${notes?.length ? ` (${notes.join("; ")})` : ""}`, false, true);
         } catch (error) {
           button.disabled = false;
           status("global-status", error.message, true);
