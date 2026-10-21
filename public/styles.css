@@ -938,3 +938,42 @@ a.reviewer:hover b { text-decoration: underline; }
 .camera-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .camera-status { flex: 1 1 100%; margin: 0; }
 #camera-torch.is-active { color: var(--ink); background: var(--acid); border-color: var(--acid); }
+
+/* Подтверждения сохранений: всплывают поверх страницы и сами исчезают.
+   Живут в styles.css, поэтому одинаково выглядят на сайте и в админке. */
+.nrg-toast-stack {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 120;
+  display: flex; flex-direction: column; align-items: flex-end; gap: .5rem;
+  max-width: min(24rem, calc(100% - 2rem)); pointer-events: none;
+}
+.nrg-toast {
+  display: flex; align-items: center; gap: .6rem; max-width: 100%;
+  padding: .7rem .9rem .7rem .7rem; border: 1px solid var(--line); border-radius: .9rem;
+  color: var(--paper); background: rgba(18, 15, 13, .96);
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, .45);
+  font-size: .78rem; line-height: 1.35; text-align: left;
+  opacity: 0; transform: translateY(.6rem) scale(.98);
+  transition: opacity .22s var(--ease), transform .22s var(--ease);
+  cursor: pointer; pointer-events: auto;
+}
+.nrg-toast.is-shown { opacity: 1; transform: none; }
+.nrg-toast.is-leaving { opacity: 0; transform: translateY(.4rem) scale(.98); }
+.nrg-toast--ok { border-color: color-mix(in srgb, var(--acid) 45%, transparent); }
+.nrg-toast--error { border-color: color-mix(in srgb, var(--pink) 55%, transparent); }
+.nrg-toast__icon {
+  display: grid; place-items: center; flex: 0 0 auto; width: 1.5rem; height: 1.5rem;
+  border-radius: 50%; color: var(--ink); background: var(--acid);
+  font-size: .72rem; font-weight: 800; line-height: 1;
+}
+.nrg-toast--error .nrg-toast__icon { color: var(--paper); background: var(--pink); }
+.nrg-toast__text { min-width: 0; overflow-wrap: anywhere; }
+.nrg-toast.is-pulse { animation: nrg-toast-pulse .24s var(--ease); }
+@keyframes nrg-toast-pulse { 50% { transform: scale(1.02); } }
+@media (max-width: 40rem) {
+  .nrg-toast-stack { left: .8rem; right: .8rem; bottom: .8rem; align-items: stretch; max-width: none; }
+  .nrg-toast { justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nrg-toast { transition: opacity .01s linear; transform: none; }
+  .nrg-toast.is-pulse { animation: none; }
+}
