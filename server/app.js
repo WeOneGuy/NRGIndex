@@ -86,13 +86,26 @@ function createApp({ db, config }) {
   app.use(express.json({ limit: config.jsonLimit }));
   app.use(cookieParser());
   app.use((req, res, next) => {
-    if (req.path.startsWith("/api")) res.setHeader("Cache-Control", "no-store");
+    if (req.path.startsWith("/api")) {
+      // Публичные данные можно хранить в браузере, но обязательно перепроверять
+      // по ETag — так работает 304 без риска показать устаревшее. Приватные
+      // API (auth/cabinet/admin) по-прежнему no-store.
+      res.setHeader(
+        "Cache-Control",
+        req.path.startsWith("/api/public") ? "public, no-cache" : "no-store",
+      );
+    }
     req.user = auth.userFromRequest(req, res);
     next();
   });
   app.use("/api", csrfGuard);
 
   app.get("/api/health", (req, res) => res.json({ ok: true, version: pkg.version }));
+  // Лёгкий health для WAF/балансировщика: без БД и рендера.
+  app.get("/healthz", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).json({ ok: true });
+  });
 
   app.use("/api/public", require("./routes/public")(db));
   app.use("/api/auth", require("./routes/auth")(db, auth));
