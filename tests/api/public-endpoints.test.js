@@ -44,6 +44,16 @@ test("healthz: лёгкий ответ без БД и без кэша", async ()
   assert.equal(res.headers.get("cache-control"), "no-store");
 });
 
+test("metrics: Prometheus-текст без кэша", async () => {
+  const res = await fetch(`${ctx.base}/metrics`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") || "", /text\/plain/);
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  const text = await res.text();
+  assert.match(text, /nrgindex_up 1/);
+  assert.match(text, /nrgindex_requests_total \d+/);
+});
+
 test("api/public/version: версия приложения", async () => {
   const res = await fetch(`${ctx.base}/api/public/version`);
   assert.equal(res.status, 200);
