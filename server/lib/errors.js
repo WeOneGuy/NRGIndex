@@ -16,5 +16,21 @@ const notFound = (message = "Не найдено", code = "not_found") => new Ap
 const conflict = (message, code = "conflict") => new ApiError(409, message, code);
 const tooMany = (message = "Слишком много попыток", code = "rate_limited") =>
   new ApiError(429, message, code);
+// Внешний источник ответил ошибкой — это не наша внутренняя ошибка.
+const badGateway = (message = "Источник недоступен", code = "bad_gateway") =>
+  new ApiError(502, message, code);
+// Внешний источник не ответил вовремя: 504, чтобы не выдавать таймаут за 500.
+const gatewayTimeout = (message = "Источник не ответил вовремя", code = "timeout") =>
+  new ApiError(504, message, code);
 
-module.exports = { ApiError, badRequest, unauthorized, forbidden, notFound, conflict, tooMany };
+module.exports = {
+  ApiError,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  tooMany,
+  badGateway,
+  gatewayTimeout,
+};

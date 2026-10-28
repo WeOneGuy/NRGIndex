@@ -1,4 +1,5 @@
 const path = require("node:path");
+const crypto = require("node:crypto");
 const express = require("express");
 const helmet = require("helmet");
 const compression = require("compression");
@@ -16,11 +17,12 @@ let requestsTotal = 0;
 // Стек не пишем, только сообщение и адрес.
 function logServerError(db, req, err, status) {
   try {
+    const id = req.id || "-";
     const message = String(err?.message || err || "внутренняя ошибка")
       .replace(/\s+/g, " ")
       .slice(0, 300);
     writeAudit(db, req.user, "error", "error", String(status), String(`${req.method} ${req.originalUrl}`).slice(0, 300), {
-      summary: `Ошибка ${status}: ${message}`,
+      summary: `Ошибка ${status} [${id}]: ${message}`,
     });
   } catch {
     /* журнал не должен ломать обработку ошибок */
@@ -87,6 +89,12 @@ function createApp({ db, config }) {
     }),
   );
   app.use(compression());
+  // Короткий id запроса: попадает в журнал ошибок админки и в ответ 5xx,
+  // чтобы пользователь мог назвать код, а мы нашли причину в логах.
+  app.use((req, res, next) => {
+    req.id = crypto.randomBytes(6).toString("hex");
+    next();
+  });
   app.use((req, res, next) => {
     requestsTotal += 1;
     next();
@@ -190,19 +198,34 @@ function createApp({ db, config }) {
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
-    const status = err?.status || err?.statusCode || 500;
+    // AbortSignal.timeout бросает DOMException с именем TimeoutError/AbortError:
+    // это не поломка сервера, а неответивший внешний источник.
+    const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
+    const status = err?.status || err?.statusCode || (isTimeout ? 504 : 500);
     if (status >= 500) logServerError(db, req, err, status);
+    const requestId = req.id;
     if (err instanceof ApiError) {
-      return res.status(err.status).json({ error: err.message, code: err.code });
+      const body = { error: err.message, code: err.code };
+      if (err.status >= 500) body.requestId = requestId;
+      return res.status(err.status).json(body);
     }
     if (err?.type === "entity.too.large") {
-      return res.status(413).json({ error: "Слишком большой запрос" });
+      return res.status(413).json({ error: "Слишком большой запрос", code: "payload_too_large" });
+    }
+    if (err?.type === "entity.parse.failed") {
+      return res.status(400).json({ error: "Некорректный JSON в запросе", code: "invalid_json" });
+    }
+    if (isTimeout) {
+      return res.status(504).json({ error: "Источник не ответил вовремя", code: "timeout", requestId });
     }
     if (err?.status || err?.statusCode) {
       return res.status(err.status || err.statusCode).end();
     }
-    console.error("[nrgindex]", err);
-    return res.status(500).json({ error: "Внутренняя ошибка" });
+    // Пользователю — общее сообщение и код запроса, реальная причина — в журнале.
+    console.error(`[nrgindex ${requestId || "-"}]`, err);
+    return res
+      .status(500)
+      .json({ error: "Внутренняя ошибка сервера", code: "internal", requestId });
   });
 
   return app;
