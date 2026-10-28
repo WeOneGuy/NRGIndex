@@ -2,7 +2,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
-const { startServer } = require("../helpers");
+const { startServer, request } = require("../helpers");
 
 let ctx;
 
@@ -75,4 +75,11 @@ test("публичный API: public, no-cache и 304 по ETag", async () => {
 test("приватный API остаётся no-store", async () => {
   const res = await fetch(`${ctx.base}/api/auth/me`);
   assert.equal(res.headers.get("cache-control"), "no-store");
+});
+
+test("битый JSON в POST — 400 invalid_json с текстом, не 500", async () => {
+  const res = await request(ctx.base, "POST", "/api/auth/login", { raw: "{" });
+  assert.equal(res.status, 400);
+  assert.equal(res.json?.code, "invalid_json");
+  assert.match(res.json?.error || "", /JSON/);
 });

@@ -1,5 +1,5 @@
 const express = require("express");
-const { notFound, tooMany, badRequest } = require("../lib/errors");
+const { notFound, tooMany, badRequest, badGateway, gatewayTimeout } = require("../lib/errors");
 const { str, oneOf, imageFromDataUrl } = require("../lib/validate");
 const {
   parseDrinkText,
@@ -35,6 +35,10 @@ const history = require("../lib/history");
     matchWords,
   } = require("../lib/content");
 const { drinkToAdmin, userToApi } = require("../lib/serialize");
+
+// undici/Node бросают DOMException с этими именами, когда сработал AbortSignal.timeout
+// или соединение прервали: это таймаут источника, а не ошибка нашего сервера.
+const isTimeoutError = (error) => error?.name === "TimeoutError" || error?.name === "AbortError";
 
 // base нужен для PATCH: неуказанные поля не сбрасываются в дефолт, а остаются как были.
 // Тир и отзыв сюда не входят: их частичная правка живёт рядом с рейтингом.
@@ -611,6 +615,9 @@ module.exports = (db, auth, config) => {
   // поэтому <img> пустые, а canvas падает. Клиент подменяет src на прокси
   // при ошибке загрузки. Лимит общий с поиском фото.
   const PHOTO_PROXY_MAX_BYTES = 8 * 1024 * 1024;
+  // Внешние сайты умеют «висеть» минутами: 10 секунд — предел ожидания для пользователя.
+  // Переменная нужна тестам, чтобы не ждать по-настоящему.
+  const PHOTO_PROXY_TIMEOUT_MS = Number(process.env.PHOTO_PROXY_TIMEOUT_MS) || 10000;
 
   router.get("/ai/photo-proxy", async (req, res) => {
     const raw = str(req.query?.url ?? "", "Ссылка", { max: 2000 });
@@ -623,14 +630,35 @@ module.exports = (db, auth, config) => {
     if (!["http:", "https:"].includes(target.protocol)) throw badRequest("Только http/https ссылки");
     checkPhotoLimit(req.user.id);
     const ai = aiSettings(db);
-    const upstream = await ai.fetchImpl(target.toString(), {
-      headers: { "user-agent": "NRGIndex/2.0 (energy drink tier list)", accept: "image/*" },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!upstream.ok) throw badRequest(`Сайт не отдал картинку (HTTP ${upstream.status})`);
+    let upstream;
+    try {
+      upstream = await ai.fetchImpl(target.toString(), {
+        headers: { "user-agent": "NRGIndex/2.0 (energy drink tier list)", accept: "image/*" },
+        signal: AbortSignal.timeout(PHOTO_PROXY_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw gatewayTimeout("Источник фото не ответил — выбери другое", "photo_timeout");
+      }
+      throw badGateway("Не удалось получить фото с сайта", "photo_upstream");
+    }
+    if (!upstream.ok) {
+      throw badGateway(`Сайт не отдал картинку (HTTP ${upstream.status}) — выбери другое`, "photo_upstream");
+    }
     const contentType = String(upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-    if (!contentType.startsWith("image/")) throw badRequest("Ссылка ведёт не на изображение");
-    const buffer = Buffer.from(await upstream.arrayBuffer());
+    if (!contentType.startsWith("image/")) {
+      throw badGateway("Ссылка ведёт не на изображение", "photo_not_image");
+    }
+    let buffer;
+    try {
+      buffer = Buffer.from(await upstream.arrayBuffer());
+    } catch (error) {
+      // Тело может оборваться уже после заголовков — это тоже таймаут/сбой источника.
+      if (isTimeoutError(error)) {
+        throw gatewayTimeout("Источник фото не ответил — выбери другое", "photo_timeout");
+      }
+      throw badGateway("Не удалось получить фото с сайта", "photo_upstream");
+    }
     if (!buffer.length || buffer.length > PHOTO_PROXY_MAX_BYTES) {
       throw badRequest("Картинка слишком большая для прокси");
     }

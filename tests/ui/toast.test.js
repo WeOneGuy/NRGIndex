@@ -147,7 +147,10 @@ test("админка: успешные сохранения дублируютс
 test("страницы подключают тост до своих скриптов", () => {
   const cabinetScript = CABINET_HTML.indexOf('<script src="toast.js"></script>');
   assert.notEqual(cabinetScript, -1);
-  assert.ok(cabinetScript < CABINET_HTML.indexOf('<script src="cabinet.js"></script>'));
+  // Основной скрипт может подключаться с ?v=… для сброса кэша.
+  const cabinetMain = CABINET_HTML.search(/<script src="cabinet\.js(?:\?v=[\w.-]+)?"><\/script>/);
+  assert.notEqual(cabinetMain, -1);
+  assert.ok(cabinetScript < cabinetMain);
   const adminScript = ADMIN_HTML.indexOf('<script src="/toast.js"></script>');
   assert.notEqual(adminScript, -1);
   assert.ok(adminScript < ADMIN_HTML.indexOf('<script src="/admin.js"></script>'));

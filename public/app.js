@@ -645,9 +645,13 @@
     // Оба запроса летят параллельно: ожидание роли не задерживает тирлист.
     const [meResult, summaryResult] = await Promise.allSettled([
       fetch("api/auth/me", { headers: { accept: "application/json" } }).then((res) => res.json()),
-      fetch("api/public/summary", { headers: { accept: "application/json" } }).then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+      fetch("api/public/summary", { headers: { accept: "application/json" } }).then(async (res) => {
+        if (res.ok) return res.json();
+        // Сервер отдаёт {error, requestId}: показываем причину и код, а не голый HTTP.
+        const info = await res.json().catch(() => null);
+        const text = info?.error || `HTTP ${res.status}`;
+        const requestId = info?.requestId ? ` (код ${info.requestId})` : "";
+        throw new Error(`${text}${requestId}`);
       }),
     ]);
     currentUser = meResult.status === "fulfilled" ? meResult.value?.user || null : null;

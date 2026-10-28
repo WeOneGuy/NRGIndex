@@ -51,15 +51,26 @@
   };
 
   const api = async (method, path, body) => {
-    const res = await fetch(path, {
-      method,
-      headers: {
-        "x-nrg-request": "1",
-        ...(body !== undefined ? { "content-type": "application/json" } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      credentials: "same-origin",
-    });
+    let res;
+    try {
+      res = await fetch(path, {
+        method,
+        headers: {
+          "x-nrg-request": "1",
+          ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        credentials: "same-origin",
+      });
+    } catch {
+      // fetch падает только при сетевом сбое: сервер недоступен, интернета нет.
+      const error = new Error("Нет связи с сервером — проверь интернет");
+      error.status = 0;
+      error.code = "network";
+      error.requestId = "";
+      error.payload = null;
+      throw error;
+    }
     let json = null;
     try {
       json = await res.json();
@@ -67,11 +78,14 @@
       json = null;
     }
     if (!res.ok) {
-      const error = new Error(
-        json?.error || `Сервер ответил HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`,
-      );
+      const requestId = json?.requestId || "";
+      const text =
+        json?.error || `Сервер ответил HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
+      // Код запроса показываем рядом с текстом: по нему причина ищется в журнале.
+      const error = new Error(requestId ? `${text} (код ${requestId})` : text);
       error.status = res.status;
       error.code = json?.code || "";
+      error.requestId = requestId;
       // 409 от защиты дублей приносит список похожих — его показываем в форме.
       error.payload = json;
       throw error;
@@ -798,9 +812,9 @@
             opinion.original = null;
             opinion.originalUrl = item.url;
             pickOpinionImage(dataUrl, "фото из ленты ✓");
-          } catch {
+          } catch (error) {
             tile.classList.remove("is-loading");
-            setOpPhotoStatus("не удалось взять это фото", true);
+            setOpPhotoStatus(error?.message || "не удалось взять это фото", true);
           }
         };
         $("op-photo-track").appendChild(tile);
@@ -984,7 +998,8 @@
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => resolve(img);
-      img.onerror = reject;
+      // Событие ошибки не несёт причины: даём тексту, который увидит пользователь.
+      img.onerror = () => reject(new Error("Не удалось загрузить картинку — источник не ответил"));
       img.src = src;
     });
 
