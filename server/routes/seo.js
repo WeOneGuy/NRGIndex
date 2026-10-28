@@ -1,6 +1,8 @@
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { renderOgCard } = require("../lib/og");
+const { contentUpdatedAt } = require("../lib/content");
 
 function baseUrl(req, config) {
   const fromEnv = String(config.siteUrl || "").trim().replace(/\/+$/, "");
@@ -58,6 +60,54 @@ function wordForm(value, forms) {
   if (n1 > 1 && n1 < 5) return forms[1];
   if (n1 === 1) return forms[0];
   return forms[2];
+}
+
+// OG-картинки 1200x630 — дорогая генерация (sharp). Кэшируем по версии
+// контента: при правке банки/оценки версия меняется, картинка перерисуется.
+const OG_CACHE_LIMIT = 64;
+const ogCache = new Map();
+
+function etagFor(buffer) {
+  return `"${crypto.createHash("sha1").update(buffer).digest("base64url")}"`;
+}
+
+async function cachedOg(key, version, render) {
+  const cached = ogCache.get(key);
+  if (cached && cached.version === version) return cached;
+  const buffer = await render();
+  const stamp = Date.parse(version);
+  const entry = {
+    version,
+    buffer,
+    etag: etagFor(buffer),
+    lastModified: Number.isFinite(stamp) ? new Date(stamp) : new Date(),
+  };
+  ogCache.set(key, entry);
+  if (ogCache.size > OG_CACHE_LIMIT) ogCache.delete(ogCache.keys().next().value);
+  return entry;
+}
+
+function sendOg(req, res, entry) {
+  res.set({
+    "Cache-Control": "public, max-age=600",
+    ETag: entry.etag,
+    "Last-Modified": entry.lastModified.toUTCString(),
+  });
+  const inm = String(req.get("if-none-match") || "").trim();
+  if (
+    inm &&
+    (inm === "*" ||
+      inm.split(",").some((tag) => tag.trim().replace(/^W\//, "") === entry.etag))
+  ) {
+    return res.status(304).end();
+  }
+  if (!inm) {
+    const since = Date.parse(String(req.get("if-modified-since") || ""));
+    if (Number.isFinite(since) && since >= entry.lastModified.getTime()) {
+      return res.status(304).end();
+    }
+  }
+  return res.type("png").send(entry.buffer);
 }
 
 function buildTags({ title, description, url, image }) {
@@ -181,18 +231,20 @@ module.exports = (app, db, config) => {
   // Картинки-превью 1200x630 для мессенджеров.
   app.get("/og/site.png", async (req, res, next) => {
     try {
-      const site = siteInfo(db);
-      const count = db.prepare("SELECT COUNT(*) AS n FROM drinks WHERE is_published = 1").get()?.n || 0;
-      const buffer = await renderOgCard({
-        kicker: "NRG / INDEX",
-        title: site.title,
-        subtitle: site.description,
-        bottom: count ? `${count} ${wordForm(count, ["образец", "образца", "образцов"])} в рейтинге` : "",
-        imagePath: "assets/adrenaline-yuzu-strawberry-calamansi.png",
-        publicDir: config.publicDir,
-        uploadsDir: config.uploadsDir,
+      const entry = await cachedOg("site", contentUpdatedAt(db), () => {
+        const site = siteInfo(db);
+        const count = db.prepare("SELECT COUNT(*) AS n FROM drinks WHERE is_published = 1").get()?.n || 0;
+        return renderOgCard({
+          kicker: "NRG / INDEX",
+          title: site.title,
+          subtitle: site.description,
+          bottom: count ? `${count} ${wordForm(count, ["образец", "образца", "образцов"])} в рейтинге` : "",
+          imagePath: "assets/adrenaline-yuzu-strawberry-calamansi.png",
+          publicDir: config.publicDir,
+          uploadsDir: config.uploadsDir,
+        });
       });
-      res.type("png").set("Cache-Control", "public, max-age=86400").send(buffer);
+      sendOg(req, res, entry);
     } catch (error) {
       next(error);
     }
@@ -202,23 +254,25 @@ module.exports = (app, db, config) => {
     try {
       const drink = drinkRow(db, req.params.slug);
       if (!drink) return res.status(404).end();
-      const consensus = consensusFor(db, drink.id);
-      const flavor = [drink.flavor, drink.edition].filter(Boolean).join(" · ");
-      const buffer = await renderOgCard({
-        kicker: drink.brand || "NRG / INDEX",
-        title: drink.name,
-        subtitle: flavor,
-        tier: consensus?.tier || null,
-        bottom: consensus
-          ? `${consensus.value.toFixed(1)} · ${consensus.votes} ${wordForm(consensus.votes, ["голос", "голоса", "голосов"])}`
-          : "оценок пока нет",
-        accentA: drink.accent_a || "#ff4f79",
-        accentB: drink.accent_b || "#ff7448",
-        imagePath: drink.image_path || "",
-        publicDir: config.publicDir,
-        uploadsDir: config.uploadsDir,
+      const entry = await cachedOg(`drink:${drink.id}`, contentUpdatedAt(db), () => {
+        const consensus = consensusFor(db, drink.id);
+        const flavor = [drink.flavor, drink.edition].filter(Boolean).join(" · ");
+        return renderOgCard({
+          kicker: drink.brand || "NRG / INDEX",
+          title: drink.name,
+          subtitle: flavor,
+          tier: consensus?.tier || null,
+          bottom: consensus
+            ? `${consensus.value.toFixed(1)} · ${consensus.votes} ${wordForm(consensus.votes, ["голос", "голоса", "голосов"])}`
+            : "оценок пока нет",
+          accentA: drink.accent_a || "#ff4f79",
+          accentB: drink.accent_b || "#ff7448",
+          imagePath: drink.image_path || "",
+          publicDir: config.publicDir,
+          uploadsDir: config.uploadsDir,
+        });
       });
-      res.type("png").set("Cache-Control", "public, max-age=86400").send(buffer);
+      sendOg(req, res, entry);
     } catch (error) {
       next(error);
     }

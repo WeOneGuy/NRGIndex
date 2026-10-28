@@ -14,6 +14,22 @@ function touchContent(db) {
   setSetting(db, "content_updated_at", new Date().toISOString());
 }
 
+// Версия публичного контента: по ней кэшируются OG-картинки и ETag-ответы.
+// Если настройка ещё не создана (свежая база), берём максимум updated_at.
+function contentUpdatedAt(db) {
+  const setting = db.prepare("SELECT value FROM settings WHERE key = 'content_updated_at'").get();
+  if (setting) return setting.value;
+  const row = db
+    .prepare(
+      `SELECT MAX(updated_at) AS ts FROM (
+         SELECT updated_at FROM drinks
+         UNION ALL SELECT updated_at FROM ratings
+       )`,
+    )
+    .get();
+  return row?.ts || new Date().toISOString();
+}
+
 function uniqueSlug(db, base) {
   const root = slugify(base);
   let slug = root;
@@ -334,6 +350,7 @@ function findSimilarDrinks(
 module.exports = {
   ACCENTS,
   touchContent,
+  contentUpdatedAt,
   uniqueSlug,
   ratingsForDrink,
   relationsForDrink,

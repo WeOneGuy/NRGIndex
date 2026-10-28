@@ -18,6 +18,8 @@ const PROFILE_HISTORY_LIMIT = 30;
 const { drinkImage } = require("../lib/assets");
 const { notFound } = require("../lib/errors");
 const { computeTitles } = require("../lib/titles");
+const { contentUpdatedAt } = require("../lib/content");
+const pkg = require("../../package.json");
 
 function ratingsMap(db) {
   const rows = db
@@ -52,22 +54,11 @@ function relationsMap(db) {
   return map;
 }
 
-function contentUpdatedAt(db) {
-  const setting = db.prepare("SELECT value FROM settings WHERE key = 'content_updated_at'").get();
-  if (setting) return setting.value;
-  const row = db
-    .prepare(
-      `SELECT MAX(updated_at) AS ts FROM (
-         SELECT updated_at FROM drinks
-         UNION ALL SELECT updated_at FROM ratings
-       )`,
-    )
-    .get();
-  return row?.ts || new Date().toISOString();
-}
-
 module.exports = (db) => {
   const router = express.Router();
+
+  // Версия приложения для мониторинга/деплоя: аддитивный публичный эндпоинт.
+  router.get("/version", (req, res) => res.json({ version: pkg.version }));
 
   router.get("/summary", (req, res) => {
     const tiers = db

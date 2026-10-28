@@ -8,6 +8,10 @@ const { writeAudit } = require("./db");
 const { ApiError } = require("./lib/errors");
 const pkg = require("../package.json");
 
+// Метрики процесса для Prometheus: без зависимостей и без БД.
+const startedAt = Date.now();
+let requestsTotal = 0;
+
 // Ошибки сервера (5xx) — в журнал логов админки: без них видно только успешные действия.
 // Стек не пишем, только сообщение и адрес.
 function logServerError(db, req, err, status) {
@@ -83,16 +87,52 @@ function createApp({ db, config }) {
     }),
   );
   app.use(compression());
+  app.use((req, res, next) => {
+    requestsTotal += 1;
+    next();
+  });
   app.use(express.json({ limit: config.jsonLimit }));
   app.use(cookieParser());
   app.use((req, res, next) => {
-    if (req.path.startsWith("/api")) res.setHeader("Cache-Control", "no-store");
+    if (req.path.startsWith("/api")) {
+      // Публичные данные можно хранить в браузере, но обязательно перепроверять
+      // по ETag — так работает 304 без риска показать устаревшее. Приватные
+      // API (auth/cabinet/admin) по-прежнему no-store.
+      res.setHeader(
+        "Cache-Control",
+        req.path.startsWith("/api/public") ? "public, no-cache" : "no-store",
+      );
+    }
     req.user = auth.userFromRequest(req, res);
     next();
   });
   app.use("/api", csrfGuard);
 
   app.get("/api/health", (req, res) => res.json({ ok: true, version: pkg.version }));
+  // Лёгкий health для WAF/балансировщика: без БД и рендера.
+  app.get("/healthz", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).json({ ok: true });
+  });
+  // Prometheus-метрики: nginx ограничивает доступ локальной сетью.
+  app.get("/metrics", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.type("text/plain");
+    res.send(
+      [
+        "# HELP nrgindex_up Процесс приложения жив",
+        "# TYPE nrgindex_up gauge",
+        "nrgindex_up 1",
+        "# TYPE nrgindex_uptime_seconds gauge",
+        `nrgindex_uptime_seconds ${Math.floor((Date.now() - startedAt) / 1000)}`,
+        "# TYPE nrgindex_requests_total counter",
+        `nrgindex_requests_total ${requestsTotal}`,
+        "# TYPE nrgindex_memory_rss_bytes gauge",
+        `nrgindex_memory_rss_bytes ${process.memoryUsage().rss}`,
+        "",
+      ].join("\n"),
+    );
+  });
 
   app.use("/api/public", require("./routes/public")(db));
   app.use("/api/auth", require("./routes/auth")(db, auth));
