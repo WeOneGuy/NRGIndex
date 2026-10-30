@@ -1,11 +1,12 @@
 name: Pipeline
 
-# Единый пайплайн: запускается при мерже в production (push). Два набора проверок
-# идут параллельно и дополняют друг друга (без дублей): юниты/UI/безопасность — в
-# облаке GitHub, интеграция по HTTP — на боевом раннере. Деплой — только после
-# успеха обоих. Ручной запуск идёт тем же путём, push в master молчит.
+# Публичный репозиторий: все сборки/тесты — на GitHub-hosted.
+# Деплой — pull-based агентом на CT111, который проверяет minisign-подпись
+# релиза и совпадение коммита с HEAD ветки production.
 on:
   push:
+    branches: [production]
+  pull_request:
     branches: [production]
   workflow_dispatch:
 
@@ -14,19 +15,18 @@ permissions:
 
 concurrency:
   group: pipeline-${{ github.ref }}
-  # Деплой не отменяем на полпути: второй мерж просто встанет в очередь.
   cancel-in-progress: false
 
 jobs:
-  # Быстрые категории в чистом окружении GitHub + smoke-старт сервера.
-  # Интеграционные API-тесты сюда не дублируем — они на боевом раннере.
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: npm
@@ -58,105 +58,92 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:3210/cabinet.html
           kill "$server_pid"
 
-  # На боевом раннере — интеграция по HTTP: те же сервер и БД, что у деплоя,
-  # это самая чувствительная к окружению категория. Юниты/UI уже прошли в облаке,
-  # аудит тоже там — здесь не повторяем.
   pre-deploy:
     name: Pre-deploy tests
-    runs-on: [self-hosted, nrgindex]
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      # На боевом раннере Node уже стоит (/opt/node) — не тянем его заново
-      # через setup-node (это стоило 40–60 секунд на джобу).
-      - name: Системный Node 22
-        run: |
-          echo "/opt/node/bin" >> "$GITHUB_PATH"
-          version="$(/opt/node/bin/node -p 'process.versions.node')"
-          echo "node $version"
-          case "$version" in 22.*) ;; *) echo "нужен Node 22, а стоит $version"; exit 1 ;; esac
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
-        run: npm ci --prefer-offline
+        run: npm ci
 
       - name: API and integration tests
         run: npm run test:api
 
-  # Деплой ждёт обе проверки: упал любой из тестов — деплоя нет.
-  deploy:
-    name: Deploy to LXC
+  build:
+    name: Build artifact
     needs: [test, pre-deploy]
-    runs-on: [self-hosted, nrgindex]
-    environment: production
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          clean: true
+          persist-credentials: false
 
-      # Node с раннера, без скачивания через setup-node.
-      - name: Системный Node 22
-        run: |
-          echo "/opt/node/bin" >> "$GITHUB_PATH"
-          version="$(/opt/node/bin/node -p 'process.versions.node')"
-          echo "node $version"
-          case "$version" in 22.*) ;; *) echo "нужен Node 22, а стоит $version"; exit 1 ;; esac
-
-      - name: Install production dependencies
-        run: npm ci --omit=dev --prefer-offline
-
-      - name: "Dry-run: синтаксис и миграции на временной БД"
+      - name: Package application
         run: |
           set -euo pipefail
-          node --check server/index.js
-          CHECK_DB="$(mktemp -u /tmp/nrgindex-check.XXXXXX.db)"
-          DB_PATH="$CHECK_DB" node -e "
-            const { openDatabase } = require('./server/db');
-            const db = openDatabase(process.env.DB_PATH);
-            const tables = db.prepare(\"SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'\").get().n;
-            if (tables < 8) throw new Error('мало таблиц: ' + tables);
-            console.log('dry-run ok, tables:', tables);
-            db.close();
-          "
-          rm -f "$CHECK_DB" "$CHECK_DB-wal" "$CHECK_DB-shm"
+          mkdir -p staging/app
+          rsync -a \
+            --exclude '.git/' --exclude '.github/' --exclude 'tests/' \
+            --exclude 'node_modules/' --exclude '.env*' --exclude '*.log' \
+            ./ staging/app/
+          tar -czf app.tar.gz -C staging app
+          ls -lh app.tar.gz
 
-      - name: Backup and sync app to /opt/nrgindex
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nrgindex-app
+          path: app.tar.gz
+          retention-days: 7
+
+  release:
+    name: Release
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/production'
+    runs-on: ubuntu-22.04
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: nrgindex-app
+          path: .
+
+      - name: Install minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+      - name: Sign artifact
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
           set -euo pipefail
-          LIVE=/opt/nrgindex
-          BACKUP=/home/ghrunner/backups/nrgindex-app
-          rm -rf "$BACKUP"
-          mkdir -p "$BACKUP"
-          if [ -d "$LIVE" ]; then cp -a "$LIVE" "$BACKUP"; fi
-          mkdir -p "$LIVE"
-          rsync -a --delete \
-            --exclude '.git/' \
-            --exclude '.github/' \
-            --exclude 'tests/' \
-            --exclude '.env*' \
-            --exclude '*.log' \
-            ./ "$LIVE/"
+          printf '%s' "$MINISIGN_SECRET_KEY" > minisign.key
+          chmod 600 minisign.key
+          minisign -Sm app.tar.gz -s minisign.key -x app.tar.gz.minisig
+          rm -f minisign.key
+          ls -lh app.tar.gz app.tar.gz.minisig
 
-      - name: Restart and health check (with rollback)
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          HEALTH_URL="${HEALTH_URL:-http://127.0.0.1/api/health}"
-          LIVE=/opt/nrgindex
-          BACKUP=/home/ghrunner/backups/nrgindex-app
-          sudo systemctl restart nrgindex
-          ok=""
-          for i in $(seq 1 30); do
-            if curl -fsS "$HEALTH_URL" > /dev/null; then ok=1; break; fi
-            sleep 1
-          done
-          if [ -z "$ok" ]; then
-            echo "Health check не прошёл — откат"
-            sudo systemctl status nrgindex --no-pager || true
-            if [ -d "$BACKUP" ]; then
-              rsync -a --delete "$BACKUP/" "$LIVE/"
-              sudo systemctl restart nrgindex
-              echo "Откат выполнен"
-            fi
-            exit 1
+          TAG="production-${GITHUB_SHA}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
           fi
-          curl -fsS "$HEALTH_URL"
-          echo "Деплой и health check успешны"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "NRGIndex production build from ${GITHUB_SHA}" \
+            --latest \
+            app.tar.gz app.tar.gz.minisig
