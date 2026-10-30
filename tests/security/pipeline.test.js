@@ -36,7 +36,7 @@ test("pipeline: всё на GitHub-hosted, без self-hosted и /opt/node", () 
   assert.doesNotMatch(yml, /self-hosted/, "публичный репозиторий не должен использовать self-hosted runner");
   assert.doesNotMatch(yml, /\/opt\/node/, "Node ставится через setup-node, а не с прод-хоста");
   for (const name of ["test", "pre-deploy", "build", "release"]) {
-    assert.match(jobBlock(yml, name), /\n    runs-on: ubuntu-22\.04/, `${name}: только GitHub-hosted`);
+    assert.match(jobBlock(yml, name), /\n    runs-on: ubuntu-24\.04/, `${name}: только GitHub-hosted`);
   }
 });
 
